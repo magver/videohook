@@ -72,7 +72,8 @@ input/storyboard.jpg     раскадровка 4×4
 input/music, input/fonts
 output/                  ← агент кладёт final.mp4, cover.jpg, result.json (+ status.txt по ходу работы)
 ```
-Если найден `agentapi` Antigravity, диалог создаётся автоматически (`new-conversation --model=flash`).
+VideoHook сам находит запущенный Antigravity (или запускает его), подключается к его language server и создаёт
+диалог через `agentapi new-conversation --model=flash` — ручная вставка промпта не нужна.
 Если нет, промпт копируется в буфер и его нужно вставить в Antigravity. В обоих случаях VideoHook сам следит за `output/`
 и импортирует готовый ролик вместе с описаниями.
 
@@ -80,8 +81,8 @@ output/                  ← агент кладёт final.mp4, cover.jpg, resul
 
 | Возможность | Где |
 | --- | --- |
-| Gemini API (ключ из [AI Studio](https://aistudio.google.com/apikey)) | анализ видео через Files API, подбор моментов, описания |
-| Gemini CLI (вход аккаунтом AI Pro, повышенные лимиты) | те же текстовые задачи без ключа |
+| Antigravity (основной канал: мощнее модель, лимиты подписки) | подбор моментов, анализ видео и раскадровки, описания — задачи через файлы |
+| Gemini API (ключ из [AI Studio](https://aistudio.google.com/apikey)) | запасной канал, если Antigravity недоступен |
 | Antigravity + Gemini 3.8 Flash | финальный монтаж: зумы, ритм под бит, субтитры, луп, обложка |
 
 ## Публикация
@@ -99,7 +100,8 @@ main.py            запуск
 vh/core.py         пути, настройки, FFmpeg, фоновые задачи
 vh/moments.py      база моментов, пополнение, тренды AniList
 vh/discovery.py    поиск источников, heatmap, анализ звука/сцен, скачивание фрагментов
-vh/gemini.py       Gemini API / CLI
+vh/gemini.py       ИИ-задачи и промпты (Antigravity → Gemini API)
+vh/agbridge.py     подключение к запущенному Antigravity (agentapi), задачи с ответом в файле
 vh/render.py       рендер 9:16, ASS-оверлеи (libass), умный кроп, луп, обложка
 vh/antigravity.py  папка задачи, запуск агента, отслеживание, импорт
 vh/publish.py      описания, YouTube/TikTok API, ассистент

@@ -26,3 +26,13 @@ def sample_video():
             "-map", "0:v", "-map", "[a]", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", str(out),
         ])
     return out
+
+
+@pytest.fixture(autouse=True)
+def no_real_ai(monkeypatch):
+    """Тесты не должны обращаться к запущенному Antigravity и Gemini API на машине разработчика."""
+    from vh import agbridge, gemini
+
+    monkeypatch.setattr(agbridge, "scan", lambda: [])
+    monkeypatch.setattr(agbridge, "installed_exe", lambda: "")
+    monkeypatch.setattr(gemini, "_key", lambda: "")

@@ -59,7 +59,7 @@ async function poll() {
     $("#nb-agent").textContent = c.in_antigravity || "";
     $("#nb-publish").textContent = c.ready || "";
     const h = st.health;
-    $("#nb-settings").classList.toggle("on", !h.ffmpeg.ok || !(h.gemini.api || h.gemini.cli));
+    $("#nb-settings").classList.toggle("on", !h.ffmpeg.ok || !(h.gemini.api || h.gemini.antigravity));
     renderTasks(st.tasks);
     let changed = false;
     for (const t of st.tasks) {
@@ -119,8 +119,8 @@ function viewHome() {
   const hl = [
     [h.ffmpeg.ok, "FFmpeg", h.ffmpeg.ok ? "готов" : h.ffmpeg.error],
     [h.ytdlp.ok, "yt-dlp", h.ytdlp.ok ? h.ytdlp.version : "не установлен"],
-    [h.gemini.api || h.gemini.cli, "Gemini (Google AI Pro)", h.gemini.api ? "API-ключ" : h.gemini.cli ? "Gemini CLI" : "не подключён — анализ видео и пополнение базы ИИ недоступны"],
-    [h.antigravity.agentapi, "Antigravity agentapi", h.antigravity.agentapi ? "автозапуск агента" : "не найден — промпт вставляется вручную"],
+    [h.gemini.api || h.gemini.antigravity, "ИИ (Google AI Pro)", h.gemini.antigravity ? "через Antigravity" + (h.gemini.api ? " · запасной: API-ключ" : "") : h.gemini.api ? "Gemini API-ключ" : "не подключён — запустите Antigravity"],
+    [h.antigravity.agentapi, "Antigravity", h.antigravity.running ? "запущен — агент стартует автоматически" : h.antigravity.installed ? "установлен, запустится автоматически" : "не найден — промпт вставляется вручную"],
     [h.youtube.connected, "YouTube API", h.youtube.connected ? "подключён" : "ассистированная загрузка"],
     [h.tiktok.configured, "TikTok API", h.tiktok.configured ? "подключён" : "ассистированная загрузка"],
   ];
@@ -350,7 +350,7 @@ function renderEditor() {
           <h3 style="margin-top:14px">Лучшие отрезки</h3>
           <div class="sugs">${(c.suggestions || []).map((s, i) => `<div class="sugg" data-i="${i}"><span class="chip ${s.source === "gemini" ? "src-ai" : s.source === "heatmap" ? "src-youtube" : "src-manual"}">${{ gemini: "Gemini", heatmap: "Пересмотры", local: "Звук+динамика" }[s.source] || s.source}</span>
             <b>${fmtT(s.start)}–${fmtT(s.end)}</b><span class="muted" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.reason || "")}</span>${(s.confirmed_by || []).length ? `<span class="chip ok">✓ ${s.confirmed_by.length + 1} сигнала</span>` : ""}</div>`).join("") || '<small class="muted">нет данных</small>'}</div>
-          <button class="btn sm" style="margin-top:8px" id="e-ai" ${st.health?.gemini?.api || st.health?.gemini?.cli ? "" : "disabled title='Подключите Gemini в настройках'"}>✨ Gemini-анализ видео</button><small class="muted" style="display:block;margin-top:4px">Gemini смотрит исходник и предлагает отрезок, хук, реплики с таймингом и идеи монтажа</small>
+          <button class="btn sm" style="margin-top:8px" id="e-ai" ${st.health?.gemini?.api || st.health?.gemini?.antigravity ? "" : "disabled title='Подключите Gemini в настройках'"}>✨ Gemini-анализ видео</button><small class="muted" style="display:block;margin-top:4px">Gemini смотрит исходник и предлагает отрезок, хук, реплики с таймингом и идеи монтажа</small>
         </div>
         <div class="stack">
           <label class="f">Хук (сверху, первые секунды решают всё)<input id="e-hook" value="${esc(c.hook)}" maxlength="70"></label>
@@ -482,7 +482,7 @@ function pubCard(c) {
       <div class="row" style="margin-top:6px"><button class="btn sm" data-a="reveal">Файл</button><a class="btn sm" href="${media(c.final_file)}" download>Скачать</a></div></div>
     <div class="stack">
       <div class="row between"><div><b>${esc(c.anime)} — ${esc(c.title)}</b><br><small>${esc(c.credit)}</small></div>
-        <button class="btn sm" data-a="gen">✨ ${caps.youtube ? "Переписать" : "Написать"} описания${S.state?.health?.gemini?.api || S.state?.health?.gemini?.cli ? " (Gemini)" : ""}</button></div>
+        <button class="btn sm" data-a="gen">✨ ${caps.youtube ? "Переписать" : "Написать"} описания${S.state?.health?.gemini?.api || S.state?.health?.gemini?.antigravity ? " (Gemini)" : ""}</button></div>
       <div class="seg">${Object.entries(PLAT).map(([k, n]) => `<button data-tab="${k}" class="${k === tab ? "on" : ""}">${n}${status[k] ? " ✓" : ""}</button>`).join("")}</div>
       ${!caps.youtube ? `<div class="empty" style="padding:16px">Описания ещё не готовы — нажмите «Написать описания».</div>` : `
       ${tab === "youtube" ? `<label class="f">Заголовок<input data-f="title" value="${esc(cp.title || "")}" maxlength="100"></label>` : ""}
@@ -545,16 +545,15 @@ function viewSettings() {
       <button class="btn" id="hc">↻ Проверить подключения</button><button class="btn primary" id="save">Сохранить</button></div>
     <div class="grid g2">
       <div class="card stack"><h2>Канал</h2>${f("brand_handle", "Подпись канала на ролике")}${f("telegram", "Telegram (ссылка в описании, необязательно)")}</div>
-      <div class="card stack"><h2>Google AI Pro — Gemini</h2>
-        <label class="f">API-ключ Gemini<input data-k="gemini_api_key" type="password" placeholder="${s.gemini_api_key_set ? "сохранён " + esc(s.gemini_api_key) : "AIza…"}"><small>Ключ бесплатно: <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>. Нужен для анализа видео (Files API).</small></label>
+      <div class="card stack"><h2>Google AI Pro — Gemini</h2>${cb("ai_via_antigravity", "ИИ-задачи через Antigravity (приоритет: мощнее модель, больше лимитов)")}
+        <label class="f">API-ключ Gemini<input data-k="gemini_api_key" type="password" placeholder="${s.gemini_api_key_set ? "сохранён " + esc(s.gemini_api_key) : "AIza…"}"><small>Ключ бесплатно: <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>. Запасной канал, если Antigravity недоступен.</small></label>
         ${f("gemini_model", "Модель Gemini", "text", "например gemini-flash-latest или gemini-pro-latest")}
-        ${cb("gemini_use_cli", "Использовать Gemini CLI (вход аккаунтом Google AI Pro), если нет ключа")}${f("gemini_cli_cmd", "Команда Gemini CLI")}
-        <small class="${h.gemini?.api || h.gemini?.cli ? "ok-t" : "warn-t"}">${h.gemini?.api ? "● API подключён" : h.gemini?.cli ? "● Gemini CLI найден" : "○ не подключено"}</small></div>
+                <small class="${h.gemini?.api || h.gemini?.antigravity ? "ok-t" : "warn-t"}">${h.gemini?.antigravity ? "● работает через Antigravity" : h.gemini?.api ? "● API подключён" : "○ не подключено"}</small></div>
       <div class="card stack"><h2>Antigravity</h2>${cb("use_antigravity", "Отправлять ролики на доработку агенту")}
         ${f("antigravity_model", "Модель агента (для задания)")}${f("antigravity_model_flag", "Значение --model для agentapi")}
-        ${f("antigravity_cmd", "Путь к agentapi / language_server.exe", "text", "пусто — автопоиск в %LOCALAPPDATA%\\Programs\\antigravity")}
+        ${cb("antigravity_auto_launch", "Запускать Antigravity автоматически, если он закрыт")}${f("antigravity_cmd", "Путь к Antigravity.exe", "text", "пусто — автопоиск")}
         ${f("antigravity_brain_dir", "Папка brain (статус диалогов)", "text", "пусто — ~/.gemini/antigravity/brain")}
-        <small class="${h.antigravity?.agentapi ? "ok-t" : "warn-t"}">${h.antigravity?.agentapi ? "● " + esc(h.antigravity.cmd) : "○ agentapi не найден — будет ручная вставка промпта"}</small></div>
+        <small class="${h.antigravity?.agentapi ? "ok-t" : "warn-t"}">${h.antigravity?.running ? "● подключено: " + esc(h.antigravity.cmd) : h.antigravity?.installed ? "● установлен — запустится при первой задаче" : "○ Antigravity не найден — будет ручная вставка промпта"}</small></div>
       <div class="card stack"><h2>Монтаж</h2>
         <label class="f">Подложка по умолчанию<select data-k="default_template">${Object.entries(tpl).map(([k, n]) => `<option value="${k}" ${s.default_template === k ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
         <label class="f">Музыка по умолчанию<select data-k="default_music"><option value="auto" ${s.default_music === "auto" ? "selected" : ""}>Авто по настроению сцены</option><option value="none" ${s.default_music === "none" ? "selected" : ""}>Без музыки</option>${Object.entries(S.state?.music || {}).map(([k, n]) => `<option value="${k}" ${s.default_music === k ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>

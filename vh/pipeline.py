@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from . import antigravity, discovery, gemini, library, moments, publish
 from .core import RENDERS_DIR, get_settings, rel_to_work, resolve_work, slugify, tasks
-from .render import extract_thumbnail, render
+from .render import contact_sheet, extract_thumbnail, render
 
 log = logging.getLogger("videohook.pipeline")
 
@@ -82,35 +82,62 @@ def create_from_url(url: str, title: str = "") -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Шаг 1: источник и лучший отрезок
 # ---------------------------------------------------------------------------
-def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any]:
-    clip = library.require_clip(clip_id)
-    t = task.update if task else (lambda *a, **k: None)
-    url = source_url or clip.get("source_url")
-    candidates: List[Dict[str, Any]] = []
-    if not url:
-        t(0.05, "Ищу лучший источник на YouTube…")
-        candidates = discovery.find_source_for_moment(
-            {"query": clip.get("query") or f"{clip.get('anime')} {clip.get('title')}", "query_en": clip.get("query_en")})
-        if not candidates:
-            raise RuntimeError("Источник не найден — вставьте ссылку вручную")
-        url = candidates[0]["url"]
-    t(0.15, "Читаю метаданные и карту пересмотров…")
+def _source_candidates(clip: Dict[str, Any], explicit_url: str = "") -> List[Dict[str, Any]]:
+    """Ссылка пользователя/момента первой, затем результаты поиска (запасные варианты)."""
+    out: List[Dict[str, Any]] = []
+    for url in (explicit_url, clip.get("source_url")):
+        if url and url not in [c["url"] for c in out]:
+            out.append({"url": url, "title": "", "views": 0, "duration": 0, "channel": ""})
+    if explicit_url:
+        return out  # пользователь указал ссылку явно — не подменяем её найденными роликами
+    query = {"title": clip.get("title", ""), "query": clip.get("query") or f"{clip.get('anime')} {clip.get('title')}",
+             "query_en": clip.get("query_en", ""), "anime_en": clip.get("anime_en", ""),
+             "anime_ru": clip.get("anime_ru", "") or clip.get("anime", "")}
+    for c in discovery.find_source_for_moment(query):
+        if c["url"] not in [o["url"] for o in out]:
+            out.append(c)
+    return out
+
+
+def _download_best(url: str, clip: Dict[str, Any], t) -> Dict[str, Any]:
     info = discovery.video_info(url)
     dur = info.get("duration") or 0
     heat = discovery.heatmap_windows(info.get("heatmap") or [], TARGET_SECONDS, 3, dur)
-
     section = None
     if dur > 240 and heat:
         best = heat[0]
         section = (max(0.0, best["start"] - 20), min(dur, best["end"] + 25))
-    elif dur > 900:
-        section = None  # длинная серия без heatmap: скачиваем целиком, анализируем локально
 
     def prog(p, msg):
         t(0.2 + 0.5 * p, msg)
 
     t(0.2, "Скачиваю " + ("нужный фрагмент…" if section else "видео…"))
     dl = discovery.download(url, section=section, name_hint=f"{clip.get('anime')}_{clip.get('title')}", progress=prog)
+    return {"info": info, "heat": heat, "dl": dl}
+
+
+def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any]:
+    clip = library.require_clip(clip_id)
+    t = task.update if task else (lambda *a, **k: None)
+    t(0.05, "Ищу лучший источник на YouTube…")
+    candidates = _source_candidates(clip, source_url)
+    if not candidates:
+        raise RuntimeError("На YouTube не нашлось роликов с этой сценой. Уточните запрос момента или вставьте ссылку")
+    got = None
+    errors: List[str] = []
+    for i, cand in enumerate(candidates[:5]):
+        t(0.15, f"Источник {i + 1}/{min(5, len(candidates))}: читаю метаданные и карту пересмотров…")
+        try:
+            got = _download_best(cand["url"], clip, t)
+            break
+        except Exception as exc:  # noqa: BLE001 — недоступное видео: пробуем следующее
+            log.warning("source %s: %s", cand["url"], exc)
+            errors.append(f"{cand['url']}: {str(exc)[:120]}")
+            if isinstance(exc, discovery.SourceError):
+                raise
+    if not got:
+        raise RuntimeError("Не удалось скачать ни один источник:\n" + "\n".join(errors))
+    info, heat, dl = got["info"], got["heat"], got["dl"]
     offset = dl["offset"]
     local_dur = dl["duration"]
 
@@ -139,7 +166,7 @@ def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any
         "source_file": rel_to_work(dl["path"]),
         "source_duration": local_dur,
         "source_offset": offset,
-        "source_candidates": candidates[:6],
+        "source_candidates": [c for c in candidates if c.get("title")][:6],
         "suggestions": suggestions,
         "segment": {"start": best["start"], "end": best["end"]},
         "thumb": rel_to_work(thumb) if thumb else "",
@@ -147,24 +174,32 @@ def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any
     library.update_clip(clip_id, patch, note=f"Источник: {patch['source_title'][:60]} ({int(local_dur)} c)")
     library.advance_stage(clip_id, "downloaded")
 
-    if gemini.available() and get_settings().get("gemini_api_key"):
+    if gemini.available():
         try:
             ai_analyze(clip_id, task)
         except Exception as exc:  # noqa: BLE001
             log.warning("Gemini analyze: %s", exc)
-            library.update_clip(clip_id, {}, note=f"Gemini-анализ пропущен: {str(exc)[:100]}")
+            library.update_clip(clip_id, {}, note=f"ИИ-анализ пропущен: {str(exc)[:100]}")
     t(1.0, "Источник готов")
     return library.require_clip(clip_id)
 
 
 def ai_analyze(clip_id: str, task=None) -> Dict[str, Any]:
-    """Gemini смотрит исходник и предлагает отрезки, хук, реплики, идеи монтажа."""
+    """Gemini (через Antigravity или API) смотрит исходник и предлагает отрезки, хук, реплики, идеи монтажа."""
     clip = library.require_clip(clip_id)
     if task:
         task.update(0.85, "Gemini смотрит видео…")
     src = resolve_work(clip["source_file"])
     ctx = f"{clip.get('anime_name')}, сцена «{clip.get('title')}»"
-    data = gemini.analyze_video(src, ctx, TARGET_SECONDS)
+    storyboard = None
+    try:
+        sb = RENDERS_DIR / f"{clip_id}_storyboard.jpg"
+        storyboard = contact_sheet(str(src), str(sb))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("storyboard: %s", exc)
+    data = gemini.analyze_video(src, ctx, TARGET_SECONDS, mood=clip.get("mood", ""), hook=clip.get("hook", ""),
+                                hints=clip.get("suggestions", []), storyboard=storyboard,
+                                progress=(lambda m: task.update(None, m)) if task else None)
     suggestions = discovery.merge_suggestions(data.get("segments", []), clip.get("suggestions", []), top_k=5)
     patch: Dict[str, Any] = {"suggestions": suggestions, "ai": {k: data.get(k) for k in ("hook", "caption", "mood")}}
     if suggestions:

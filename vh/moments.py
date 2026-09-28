@@ -266,7 +266,8 @@ def refill(anime: Dict[str, Any], task=None) -> Dict[str, Any]:
         task.update(0.1, "Gemini подбирает новые моменты…")
     if gemini.available():
         try:
-            fresh = gemini.suggest_moments(name, known, count=REFILL_BATCH, genres=anime.get("genres", []))
+            fresh = gemini.suggest_moments(name, known, count=REFILL_BATCH, genres=anime.get("genres", []),
+                                           anime_en=anime.get("en", ""))
             n = add_moments(key, fresh, {"ru": anime.get("ru"), "en": anime.get("en"),
                                          "studio": anime.get("studio"), "genres": anime.get("genres")}, source="ai")
             added += n

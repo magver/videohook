@@ -117,17 +117,16 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "brand_handle": "@anime_hook",          # подпись канала на ролике
     "telegram": "",                          # опциональная ссылка на Telegram в описании
     "language": "ru",
-    # Google AI Pro
-    "gemini_api_key": "",                    # ключ AI Studio (aistudio.google.com/apikey)
-    "gemini_model": "gemini-flash-latest",   # модель для анализа видео/текстов
-    "gemini_use_cli": True,                  # использовать Gemini CLI (вход по подписке) если нет ключа
-    "gemini_cli_cmd": "gemini",
+    # Google AI Pro: ИИ-задачи идут в Antigravity (приоритет), Gemini API — запасной канал
+    "ai_via_antigravity": True,              # подбор моментов, анализ видео, описания — через Antigravity
+    "gemini_api_key": "",                    # ключ AI Studio (aistudio.google.com/apikey), запасной канал
+    "gemini_model": "gemini-flash-latest",   # модель Gemini API
     # Antigravity
     "antigravity_model": "Gemini 3.8 Flash",
-    "antigravity_cmd": "",                   # путь к agentapi / language_server (автопоиск, если пусто)
+    "antigravity_cmd": "",                   # путь к Antigravity.exe для автозапуска (автопоиск, если пусто)
     "antigravity_brain_dir": "",             # ~/.gemini/antigravity/brain (автопоиск, если пусто)
     "antigravity_model_flag": "flash",      # значение --model для agentapi new-conversation
-    "antigravity_auto_launch": True,
+    "antigravity_auto_launch": True,         # запускать Antigravity, если он закрыт
     "use_antigravity": True,                 # False — публиковать локальный рендер без агента
     # Рендер
     "default_template": "cinema",

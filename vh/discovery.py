@@ -13,6 +13,7 @@ import array
 import logging
 import math
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -37,10 +38,35 @@ class _YdlLog:
         log.info("yt-dlp: %s", msg[:300])
 
 
-def _ydl(opts: Dict[str, Any]):
-    import yt_dlp  # тяжёлый импорт — лениво
+class SourceError(RuntimeError):
+    pass
 
-    base = {"quiet": True, "no_warnings": True, "socket_timeout": 20, "logger": _YdlLog()}
+
+def _import_ytdlp():
+    try:
+        import yt_dlp  # тяжёлый импорт — лениво
+    except ImportError as exc:
+        raise SourceError("Не установлен yt-dlp — поиск и скачивание с YouTube невозможны. "
+                          "Выполните: python -m pip install -r requirements.txt") from exc
+    return yt_dlp
+
+
+def _js_runtimes() -> Dict[str, Dict[str, Any]]:
+    """YouTube требует JS-движок для расшифровки ссылок: deno (по умолчанию yt-dlp) или node."""
+    rt: Dict[str, Dict[str, Any]] = {"deno": {}}
+    if shutil.which("node"):
+        rt["node"] = {}
+    return rt
+
+
+def _base_opts() -> Dict[str, Any]:
+    return {"quiet": True, "no_warnings": True, "socket_timeout": 20, "logger": _YdlLog(),
+            "js_runtimes": _js_runtimes()}
+
+
+def _ydl(opts: Dict[str, Any]):
+    yt_dlp = _import_ytdlp()
+    base = _base_opts()
     base.update(opts)
     return yt_dlp.YoutubeDL(base)
 
@@ -220,30 +246,60 @@ def merge_suggestions(*groups: List[Dict[str, Any]], top_k: int = 5) -> List[Dic
 # ---------------------------------------------------------------------------
 # Поиск источника для момента
 # ---------------------------------------------------------------------------
-def find_source_for_moment(moment: Dict[str, Any], anime: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    """Кандидаты-источники для момента: сначала RU-запрос, затем EN; лучшие по просмотрам."""
+def source_queries(moment: Dict[str, Any]) -> List[str]:
+    """Запросы от точного к общему: свои запросы момента, затем «тайтл + сцена» на EN/RU."""
+    title = (moment.get("title") or "").strip()
+    en = (moment.get("anime_en") or "").strip()
+    ru = (moment.get("anime_ru") or moment.get("anime") or "").strip()
+    qs = [moment.get("query_en"), moment.get("query"),
+          f"{en} {moment.get('query_en') or title} scene" if en and moment.get("query_en") and en.lower() not in moment["query_en"].lower() else "",
+          f"{ru} {title}" if ru and title else "",
+          f"{en} {title}" if en and title else "",
+          f"{en} best scenes" if en else ""]
+    out: List[str] = []
+    for q in qs:
+        q = re.sub(r"\s+", " ", (q or "")).strip()
+        if q and q.lower() not in [o.lower() for o in out]:
+            out.append(q)
+    return out
+
+
+def find_source_for_moment(moment: Dict[str, Any], anime: Optional[Dict[str, Any]] = None,
+                           want: int = 8) -> List[Dict[str, Any]]:
+    """Кандидаты-источники для момента, лучшие по просмотрам и длительности.
+
+    Запросы перебираются от точного к общему, пока не наберётся достаточно кандидатов."""
     if moment.get("url"):
         return [{"url": moment["url"], "title": moment.get("title", ""), "views": moment.get("views", 0),
                  "duration": 0, "channel": "", "thumbnail": ""}]
+    if anime:
+        moment = {"anime_en": anime.get("en", ""), "anime_ru": anime.get("ru", ""), **moment}
+    _import_ytdlp()  # без yt-dlp — понятная ошибка, а не «ничего не найдено»
     results: List[Dict[str, Any]] = []
     seen = set()
-    for q in (moment.get("query"), moment.get("query_en")):
-        if not q:
-            continue
+    errors: List[str] = []
+    for i, q in enumerate(source_queries(moment)):
+        if len(results) >= want and i >= 2:
+            break
         try:
             for v in search_videos(q, limit=10, min_dur=20, max_dur=1800):
-                if v["id"] not in seen:
+                if v["id"] and v["id"] not in seen:
                     seen.add(v["id"])
+                    v["rank_bonus"] = 1.0 if i < 2 else 0.8   # точные запросы важнее общих
                     results.append(v)
         except Exception as exc:  # noqa: BLE001
             log.warning("search %s: %s", q, exc)
+            errors.append(str(exc)[:160])
+    if not results and errors:
+        raise SourceError("Поиск на YouTube не работает: " + errors[-1])
+
     # предпочтение: 1–10 минут (сцена целиком, а не чужой шортс и не полная серия)
     def score(v):
         d = v["duration"] or 120
         fit = 1.0 if 60 <= d <= 600 else (0.6 if d < 60 else 0.7)
-        return math.log10(v["views"] + 10) * fit
+        return math.log10(v["views"] + 10) * fit * v.get("rank_bonus", 1.0)
     results.sort(key=score, reverse=True)
-    return results[:8]
+    return results[:want]
 
 
 def popular_moments_for(anime: Dict[str, Any], limit: int = 10,
@@ -280,7 +336,7 @@ def popular_moments_for(anime: Dict[str, Any], limit: int = 10,
 def download(url: str, section: Optional[Tuple[float, float]] = None, name_hint: str = "",
              progress: Optional[Callable[[float, str], None]] = None) -> Dict[str, Any]:
     """Скачивает видео (или только нужный отрезок) в папку sources. Возвращает путь и метаданные."""
-    import yt_dlp
+    yt_dlp = _import_ytdlp()
     from yt_dlp.utils import download_range_func
 
     SOURCES_DIR.mkdir(parents=True, exist_ok=True)
@@ -295,6 +351,7 @@ def download(url: str, section: Optional[Tuple[float, float]] = None, name_hint:
             progress(min(0.99, got / total) if total else 0.3, "Загрузка…")
 
     opts: Dict[str, Any] = {
+        **_base_opts(),
         "format": "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
         "merge_output_format": "mp4",
         "outtmpl": tmpl,
@@ -303,9 +360,6 @@ def download(url: str, section: Optional[Tuple[float, float]] = None, name_hint:
         "retries": 3,
         "fragment_retries": 3,
         "progress_hooks": [hook],
-        "quiet": True,
-        "no_warnings": True,
-        "logger": _YdlLog(),
     }
     if section:
         opts["download_ranges"] = download_range_func(None, [(max(0.0, section[0]), section[1])])

@@ -11,7 +11,8 @@
       input/music/*.mp3, input/fonts/*.ttf
       output/               → агент кладёт сюда: final.mp4, cover.jpg, result.json, status.txt
 
-Запуск: agentapi `new-conversation` (если найден) или вручную — промпт копируется в буфер.
+Запуск: agentapi `new-conversation` через мост agbridge (находит запущенный Antigravity сам);
+если Antigravity недоступен — вручную, промпт копируется в буфер.
 Сторож (watcher) каждые несколько секунд проверяет output/ и импортирует результат в библиотеку.
 """
 
@@ -19,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
 import subprocess
 import threading
@@ -27,8 +27,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import library
-from .core import (FONTS_DIR, JOBS_DIR, MUSIC_DIR, PUBLISH_DIR, SUBPROCESS_FLAGS, get_settings, new_id,
+from . import agbridge, library
+from .core import (FONTS_DIR, JOBS_DIR, MUSIC_DIR, PUBLISH_DIR, get_settings, new_id,
                    rel_to_work, slugify)
 from .render import contact_sheet, extract_thumbnail
 
@@ -45,35 +45,19 @@ MOOD_DIRECTION = {
 
 
 def _brain_dir() -> Path:
-    custom = get_settings().get("antigravity_brain_dir")
-    return Path(custom).expanduser() if custom else Path.home() / ".gemini" / "antigravity" / "brain"
+    return agbridge.brain_dir()
 
 
 def find_agentapi() -> Optional[List[str]]:
-    custom = (get_settings().get("antigravity_cmd") or "").strip()
-    if custom:
-        p = Path(custom).expanduser()
-        if p.exists():
-            return [str(p), "agentapi"] if p.name.lower().startswith("language_server") else [str(p)]
-        found = shutil.which(custom)
-        return [found] if found else None
-    local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    cands = [
-        (local / "Programs" / "antigravity" / "resources" / "bin" / "language_server.exe", True),
-        (Path.home() / ".gemini" / "antigravity" / "bin" / "agentapi.bat", False),
-        (Path.home() / ".gemini" / "antigravity" / "bin" / "agentapi", False),
-    ]
-    for p, is_ls in cands:
-        if p.exists():
-            return [str(p), "agentapi"] if is_ls else [str(p)]
-    found = shutil.which("agentapi")
-    return [found] if found else None
+    """Команда agentapi запущенного Antigravity (None — Antigravity не запущен и не установлен)."""
+    servers = agbridge.scan()
+    if servers:
+        return [servers[0]["exe"], "agentapi"]
+    return ["antigravity"] if agbridge.available() else None
 
 
 def status() -> Dict[str, Any]:
-    cmd = find_agentapi()
-    return {"agentapi": bool(cmd), "cmd": " ".join(cmd) if cmd else "", "brain_dir": str(_brain_dir()),
-            "model": get_settings().get("antigravity_model")}
+    return agbridge.status()
 
 
 # ---------------------------------------------------------------------------
@@ -238,21 +222,13 @@ def launch(clip_id: str) -> Dict[str, Any]:
         library.advance_stage(clip_id, "in_antigravity")
         return {"mode": "manual", "prompt": prompt, "dir": str(job_dir)}
     title = f"VideoHook: {clip.get('anime', '')[:30]} — {clip.get('title', '')[:30]}"
-    model_flag = get_settings().get("antigravity_model_flag") or "flash"
-    res = subprocess.run(cmd + ["new-conversation", f"--model={model_flag}", f"--title={title}", prompt],
-                         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
-                         creationflags=SUBPROCESS_FLAGS)
-    conv_id = ""
     try:
-        data = json.loads(res.stdout)
-        conv_id = (data.get("response", {}).get("newConversation", {}) or {}).get("conversationId", "")
-    except ValueError:
-        pass
-    if res.returncode != 0 or not conv_id:
+        conv_id = agbridge.new_conversation(prompt, title)
+    except (agbridge.AntigravityError, OSError, subprocess.TimeoutExpired) as exc:
         library.update_clip(clip_id, {"ag": {"status": "manual", "prompt": prompt,
-                                             "message": f"agentapi не ответил ({(res.stderr or res.stdout)[:160]}). Вставьте промпт вручную"}})
+                                             "message": f"Antigravity не ответил ({str(exc)[:160]}). Вставьте промпт вручную"}})
         library.advance_stage(clip_id, "in_antigravity")
-        return {"mode": "manual", "prompt": prompt, "dir": str(job_dir), "error": (res.stderr or res.stdout)[:400]}
+        return {"mode": "manual", "prompt": prompt, "dir": str(job_dir), "error": str(exc)[:400]}
     library.update_clip(clip_id, {"ag": {"status": "running", "conversation_id": conv_id, "prompt": prompt,
                                          "message": "Агент запущен", "started": time.time()}},
                         note=f"Antigravity: диалог {conv_id}")
