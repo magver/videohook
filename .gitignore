@@ -1,27 +1,19 @@
-# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*$py.class
+.pytest_cache/
 
-# PyInstaller / Build artifacts
 build/
 dist/
 *.exe
 
-# Video caches and rendered outputs
-cache_clips/
-output_shorts/
-*.mp4
+# рабочие данные приложения (исходники, рендеры, задачи, токены, настройки)
+workspace/
 *.part
 *.ytdl
-*.wav
 
-# Virtual environments
 .venv/
 venv/
 env/
-
-# IDE & OS files
 .vscode/
 .idea/
 Thumbs.db

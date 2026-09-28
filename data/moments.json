@@ -1,0 +1,346 @@
+{
+  "version": 2,
+  "anime": [
+    {
+      "key": "demon slayer", "ru": "Клинок, рассекающий демонов", "en": "Demon Slayer: Kimetsu no Yaiba", "studio": "ufotable",
+      "aliases": ["клинок рассекающий демонов", "клинок", "истребитель демонов", "kimetsu no yaiba", "demon slayer", "тандзиро", "танджиро", "незуко", "зеницу", "zenitsu", "иноске", "ренгоку", "rengoku", "аказа", "akaza"],
+      "genres": ["Action", "Fantasy"],
+      "moments": [
+        {"title": "Танец Бога Огня против Руи", "episode": "1 сезон, 19 серия", "query": "Клинок рассекающий демонов 19 серия танец бога огня", "query_en": "demon slayer episode 19 hinokami kagura rui", "hook": "Самый красивый бой в аниме", "mood": "epic"},
+        {"title": "Ренгоку против Аказы", "episode": "Бесконечный поезд", "query": "Ренгоку против Аказы бой русская озвучка", "query_en": "rengoku vs akaza full fight", "hook": "Он сдержал обещание до конца", "mood": "emotional"},
+        {"title": "Удзуй и Тандзиро против Гютаро", "episode": "2 сезон, 10 серия", "query": "Клинок 2 сезон Удзуй против Гютаро бой", "query_en": "tengen vs gyutaro fight demon slayer", "hook": "Бюджет этого боя сломал интернет", "mood": "epic"},
+        {"title": "Зеницу: Седьмая форма", "episode": "Бесконечная крепость", "query": "Зеницу седьмая форма хоно икадзути но ками", "query_en": "zenitsu seventh form flaming thunder god", "hook": "Самый быстрый удар в аниме", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "jujutsu kaisen", "ru": "Магическая битва", "en": "Jujutsu Kaisen", "studio": "MAPPA",
+      "aliases": ["магическая битва", "магичка", "jujutsu kaisen", "jjk", "годжо", "годзё", "сатору", "gojo", "сукуна", "sukuna", "мегуми", "итадори", "itadori", "тодо", "махорага"],
+      "genres": ["Action", "Supernatural"],
+      "moments": [
+        {"title": "Сукуна против Махораги", "episode": "2 сезон, 17 серия", "query": "Магическая битва Сукуна против Махораги", "query_en": "sukuna vs mahoraga full fight", "hook": "Сукуна показал истинное безумие", "mood": "dark"},
+        {"title": "Годжо: «Я один достоин»", "episode": "2 сезон, 4 серия", "query": "Годжо пробуждение я один достоин фиолетовый", "query_en": "gojo throughout heaven and earth i alone am the honored one", "hook": "Момент, когда он стал сильнейшим", "mood": "epic"},
+        {"title": "Бесконечная пустота против Дзёго", "episode": "1 сезон, 7 серия", "query": "Годжо расширение территории бесконечная пустота Дзёго", "query_en": "gojo domain expansion unlimited void jogo", "hook": "Расширение территории, от которого нет спасения", "mood": "epic"},
+        {"title": "Итадори и Тодо — Чёрная вспышка", "episode": "1 сезон, 20 серия", "query": "Итадори Тодо черная вспышка против Ханами", "query_en": "itadori todo black flash hanami", "hook": "Лучший дуэт в истории аниме", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "attack on titan", "ru": "Атака титанов", "en": "Attack on Titan", "studio": "WIT Studio / MAPPA",
+      "aliases": ["атака титанов", "вторжение гигантов", "attack on titan", "aot", "shingeki no kyojin", "леви", "levi", "эрвин", "эрен", "eren", "микаса", "армин", "райнер"],
+      "genres": ["Action", "Drama"],
+      "moments": [
+        {"title": "Леви против Звероподобного", "episode": "3 сезон, 17 серия", "query": "Атака титанов Леви против Звероподобного", "query_en": "levi vs beast titan", "hook": "Леви в ярости не остановить", "mood": "epic"},
+        {"title": "Признание Райнера и Бертольда", "episode": "2 сезон, 6 серия", "query": "Атака титанов Райнер Бертольд признание", "query_en": "reiner bertholdt reveal scene", "hook": "Самый шокирующий поворот сериала", "mood": "twist"},
+        {"title": "Атака Эрвина", "episode": "3 сезон, 16 серия", "query": "Эрвин речь атака разведкорпуса", "query_en": "erwin final charge speech", "hook": "Самая сильная речь в аниме", "mood": "emotional"},
+        {"title": "Начало Гула", "episode": "Финальный сезон", "query": "Атака титанов гул земли начало", "query_en": "the rumbling begins eren", "hook": "Мир услышал этот звук", "mood": "dark"}
+      ]
+    },
+    {
+      "key": "solo leveling", "ru": "Поднятие уровня в одиночку", "en": "Solo Leveling", "studio": "A-1 Pictures",
+      "aliases": ["поднятие уровня в одиночку", "поднятие уровня", "соло левелинг", "solo leveling", "сон джин-ву", "джин ву", "jinwoo", "arise", "восстань", "игрис"],
+      "genres": ["Action", "Fantasy"],
+      "moments": [
+        {"title": "«Восстань!» — армия теней", "episode": "1 сезон, 12 серия", "query": "Поднятие уровня в одиночку Джин Ву Восстань", "query_en": "solo leveling arise scene", "hook": "Слово, от которого дрожит весь мир", "mood": "epic"},
+        {"title": "Джин-Ву против Игриса", "episode": "1 сезон, 11 серия", "query": "Джин Ву против Игриса бой", "query_en": "jinwoo vs igris fight", "hook": "Бой, который изменил всё", "mood": "epic"},
+        {"title": "Расплата с предателями", "episode": "1 сезон, 6 серия", "query": "Поднятие уровня 6 серия Джин Ву бой", "query_en": "solo leveling episode 6 fight", "hook": "Он больше не слабый E-ранг", "mood": "dark"}
+      ]
+    },
+    {
+      "key": "death note", "ru": "Тетрадь смерти", "en": "Death Note", "studio": "Madhouse",
+      "aliases": ["тетрадь смерти", "death note", "лайт", "ягами", "light yagami", "эл", "рюк", "ryuk", "миса", "кира"],
+      "genres": ["Mystery", "Thriller"],
+      "moments": [
+        {"title": "Сцена с чипсами", "episode": "8 серия", "query": "Тетрадь смерти сцена с чипсами", "query_en": "death note potato chip scene", "hook": "Самый гениальный ход Лайта", "mood": "twist"},
+        {"title": "«Всё идёт по плану»", "episode": "24 серия", "query": "Тетрадь смерти все идет по плану Лайт", "query_en": "light yagami just as planned", "hook": "Гениальный план сработал", "mood": "twist"},
+        {"title": "Последний взгляд L", "episode": "25 серия", "query": "Тетрадь смерти смерть L", "query_en": "death note L death scene", "hook": "Он знал правду до конца", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "one piece", "ru": "Ван Пис", "en": "One Piece", "studio": "Toei Animation",
+      "aliases": ["ван пис", "ванпис", "one piece", "луффи", "luffy", "зоро", "zoro", "санджи", "gear 5", "5 гир", "шанкс", "кайдо", "белоус"],
+      "genres": ["Action", "Adventure"],
+      "moments": [
+        {"title": "Пробуждение Gear 5", "episode": "1071 серия", "query": "Ван Пис Луффи gear 5 пробуждение", "query_en": "luffy gear 5 awakening", "hook": "Весь мир ждал этот момент", "mood": "epic"},
+        {"title": "Зоро: «Ничего не случилось»", "episode": "377 серия", "query": "Зоро ничего не случилось", "query_en": "zoro nothing happened", "hook": "Самая мужская сцена в аниме", "mood": "emotional"},
+        {"title": "«Ван Пис существует!»", "episode": "Маринфорд", "query": "Белоус ван пис существует", "query_en": "whitebeard the one piece is real", "hook": "Эти слова изменили эпоху", "mood": "emotional"},
+        {"title": "Удар по Кайдо", "episode": "1015 серия", "query": "Ван Пис 1015 серия удар по Кайдо", "query_en": "one piece episode 1015 luffy kaido", "hook": "Лучшая анимация в One Piece", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "chainsaw man", "ru": "Человек-бензопила", "en": "Chainsaw Man", "studio": "MAPPA",
+      "aliases": ["человек бензопила", "человек-бензопила", "chainsaw man", "csm", "дэндзи", "denji", "макима", "makima", "пауэр", "power", "аки"],
+      "genres": ["Action", "Horror"],
+      "moments": [
+        {"title": "Макима: «Бах»", "episode": "1 сезон, 8 серия", "query": "Человек бензопила Макима бах сцена", "query_en": "makima bang scene", "hook": "Самая жуткая сила в аниме", "mood": "dark"},
+        {"title": "Дэндзи против Катаны", "episode": "1 сезон, 12 серия", "query": "Дэндзи против человека катаны", "query_en": "denji vs katana man fight", "hook": "Финал, который взорвал интернет", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "naruto", "ru": "Наруто", "en": "Naruto Shippuden", "studio": "Studio Pierrot",
+      "aliases": ["наруто", "ураганные хроники", "naruto", "shippuden", "саске", "sasuke", "итачи", "itachi", "какаши", "kakashi", "мадара", "madara", "пейн", "pain", "майт гай", "обито"],
+      "genres": ["Action", "Adventure"],
+      "moments": [
+        {"title": "Майт Гай: Восьмые врата", "episode": "421 серия", "query": "Майт Гай восьмые врата против Мадары", "query_en": "might guy eight gates vs madara", "hook": "Бой, от которого плачут взрослые", "mood": "epic"},
+        {"title": "Пейн: Шинра Тенсей", "episode": "163 серия", "query": "Пейн уничтожает Коноху шинра тенсей", "query_en": "pain destroys konoha shinra tensei", "hook": "Он стёр деревню одним словом", "mood": "dark"},
+        {"title": "Какаши против Обито", "episode": "375 серия", "query": "Какаши против Обито бой", "query_en": "kakashi vs obito fight", "hook": "Лучший бой друзей всех времён", "mood": "emotional"},
+        {"title": "Наруто против Саске: финал", "episode": "476–477 серия", "query": "Наруто против Саске финальный бой", "query_en": "naruto vs sasuke final battle", "hook": "15 лет ради одного боя", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "bleach", "ru": "Блич", "en": "Bleach: Thousand-Year Blood War", "studio": "Studio Pierrot",
+      "aliases": ["блич", "bleach", "тысячелетняя кровавая война", "ичиго", "ichigo", "айзен", "aizen", "ямамото", "бьякуя", "улькиорра", "кенпачи"],
+      "genres": ["Action", "Supernatural"],
+      "moments": [
+        {"title": "Банкай Ямамото", "episode": "ТКВ, 6 серия", "query": "Блич банкай Ямамото", "query_en": "yamamoto bankai zanka no tachi", "hook": "Пламя в 15 миллионов градусов", "mood": "epic"},
+        {"title": "Айзен: «С каких пор…»", "episode": "Arrancar", "query": "Айзен с каких пор ты решил", "query_en": "aizen since when were you under the impression", "hook": "Самый хитрый злодей аниме", "mood": "twist"},
+        {"title": "Кенпачи: банкай", "episode": "ТКВ", "query": "Кенпачи банкай", "query_en": "kenpachi bankai", "hook": "Он наконец узнал имя меча", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "tokyo ghoul", "ru": "Токийский гуль", "en": "Tokyo Ghoul", "studio": "Studio Pierrot",
+      "aliases": ["токийский гуль", "гуль", "tokyo ghoul", "канеки", "kaneki", "1000-7", "джейсон"],
+      "genres": ["Action", "Horror"],
+      "moments": [
+        {"title": "1000 минус 7 — пробуждение Канеки", "episode": "1 сезон, 12 серия", "query": "Токийский гуль Канеки 1000 минус 7", "query_en": "kaneki awakening 1000 minus 7", "hook": "Сколько будет 1000 минус 7?", "mood": "dark"}
+      ]
+    },
+    {
+      "key": "hunter x hunter", "ru": "Охотник х Охотник", "en": "Hunter x Hunter (2011)", "studio": "Madhouse",
+      "aliases": ["хантер х хантер", "охотник х охотник", "hunter x hunter", "hxh", "гон", "киллуа", "killua", "хисока", "меруем", "нетеро"],
+      "genres": ["Action", "Adventure"],
+      "moments": [
+        {"title": "Нетеро против Меруэма", "episode": "125 серия", "query": "Нетеро против Меруэма сто ладоней", "query_en": "netero vs meruem 100 type guanyin", "hook": "Молитва длиною в жизнь", "mood": "epic"},
+        {"title": "Трансформация Гона", "episode": "131 серия", "query": "Гон трансформация против Питу", "query_en": "gon transformation vs pitou", "hook": "Цена мести — всё", "mood": "dark"},
+        {"title": "Меруэм и Комуги", "episode": "135 серия", "query": "Меруэм и Комуги финал", "query_en": "meruem komugi ending", "hook": "Самый грустный финал злодея", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "my hero academia", "ru": "Моя геройская академия", "en": "My Hero Academia", "studio": "Bones",
+      "aliases": ["моя геройская академия", "геройская академия", "my hero academia", "boku no hero", "mha", "деку", "мидория", "бакуго", "тодороки", "всемогущий", "all might"],
+      "genres": ["Action", "Comedy"],
+      "moments": [
+        {"title": "United States of Smash", "episode": "3 сезон, 11 серия", "query": "Всемогущий против Всё для одного последний удар", "query_en": "all might united states of smash", "hook": "Последний удар Символа Мира", "mood": "epic"},
+        {"title": "Деку против Тодороки", "episode": "2 сезон, 10 серия", "query": "Деку против Тодороки спортивный фестиваль", "query_en": "deku vs todoroki sports festival", "hook": "Это твоя сила!", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "jojo", "ru": "Невероятные приключения ДжоДжо", "en": "JoJo's Bizarre Adventure", "studio": "David Production",
+      "aliases": ["джоджо", "jojo", "джотаро", "jotaro", "дио", "dio", "джорно", "giorno", "za warudo", "ора ора"],
+      "genres": ["Action", "Adventure"],
+      "moments": [
+        {"title": "Джотаро против ДИО", "episode": "Stardust Crusaders, финал", "query": "Джотаро против Дио ора ора", "query_en": "jotaro vs dio ora ora", "hook": "Самая легендарная дуэль стендов", "mood": "epic"},
+        {"title": "Gold Experience Requiem", "episode": "Golden Wind, финал", "query": "Джорно реквием против Дьяволо", "query_en": "giorno requiem vs diavolo", "hook": "Ты никогда не дойдёшь до правды", "mood": "twist"}
+      ]
+    },
+    {
+      "key": "one punch man", "ru": "Ванпанчмен", "en": "One Punch Man", "studio": "Madhouse",
+      "aliases": ["ванпанчмен", "ван панч мен", "one punch man", "opm", "сайтама", "saitama", "генос", "гароу", "борос"],
+      "genres": ["Action", "Comedy"],
+      "moments": [
+        {"title": "Сайтама против Бороса", "episode": "1 сезон, 12 серия", "query": "Сайтама против Бороса", "query_en": "saitama vs boros", "hook": "Серьёзный удар", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "frieren", "ru": "Провожающая в последний путь Фрирен", "en": "Frieren: Beyond Journey's End", "studio": "Madhouse",
+      "aliases": ["фрирен", "frieren", "sousou no frieren", "ферн", "штарк", "аура", "химмель"],
+      "genres": ["Adventure", "Fantasy", "Drama"],
+      "moments": [
+        {"title": "«Аура, убей себя»", "episode": "1 сезон, 10 серия", "query": "Фрирен Аура убей себя", "query_en": "frieren aura kill yourself", "hook": "Она скрывала силу 1000 лет", "mood": "epic"},
+        {"title": "Химмель и кольцо", "episode": "1 сезон", "query": "Фрирен Химмель кольцо сцена", "query_en": "himmel ring scene frieren", "hook": "Самое тихое признание в аниме", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "mob psycho", "ru": "Моб Психо 100", "en": "Mob Psycho 100", "studio": "Bones",
+      "aliases": ["моб психо", "mob psycho", "моб", "шигео", "рейген", "reigen", "???%"],
+      "genres": ["Action", "Comedy"],
+      "moments": [
+        {"title": "Моб ???%", "episode": "2 сезон, 5 серия", "query": "Моб психо 100 ??? процентов", "query_en": "mob psycho ???% scene", "hook": "Когда тихий парень сорвался", "mood": "epic"},
+        {"title": "Рейген против Когтя", "episode": "2 сезон", "query": "Рейген против Когтя сцена", "query_en": "reigen vs claw speech", "hook": "Лучший взрослый в аниме", "mood": "funny"}
+      ]
+    },
+    {
+      "key": "fullmetal alchemist", "ru": "Стальной алхимик: Братство", "en": "Fullmetal Alchemist: Brotherhood", "studio": "Bones",
+      "aliases": ["стальной алхимик", "fullmetal alchemist", "fma", "эдвард", "ал", "мустанг", "mustang", "зависть", "нина"],
+      "genres": ["Action", "Drama"],
+      "moments": [
+        {"title": "Мустанг против Зависти", "episode": "53 серия", "query": "Мустанг против Зависти", "query_en": "roy mustang vs envy", "hook": "Месть в чистом пламени", "mood": "dark"},
+        {"title": "Нина", "episode": "4 серия", "query": "Стальной алхимик Нина сцена", "query_en": "fmab nina scene", "hook": "Сцена, которую невозможно забыть", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "vinland saga", "ru": "Сага о Винланде", "en": "Vinland Saga", "studio": "WIT Studio / MAPPA",
+      "aliases": ["сага о винланде", "винланд", "vinland saga", "торфинн", "thorfinn", "аскеладд", "торкелль", "торс"],
+      "genres": ["Action", "Drama"],
+      "moments": [
+        {"title": "«У меня нет врагов»", "episode": "2 сезон", "query": "Торфинн у меня нет врагов", "query_en": "thorfinn i have no enemies", "hook": "Самый сильный человек не держит меча", "mood": "emotional"},
+        {"title": "Последний ход Аскеладда", "episode": "1 сезон, 20 серия", "query": "Аскеладд смерть сцена", "query_en": "askeladd death scene", "hook": "Злодей, которого все полюбили", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "code geass", "ru": "Код Гиас", "en": "Code Geass", "studio": "Sunrise",
+      "aliases": ["код гиас", "code geass", "лелуш", "lelouch", "сузаку", "зеро", "zero requiem"],
+      "genres": ["Mecha", "Drama"],
+      "moments": [
+        {"title": "Реквием Зеро", "episode": "R2, 25 серия", "query": "Код Гиас реквием Зеро финал", "query_en": "zero requiem ending", "hook": "Самый гениальный финал в аниме", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "steins gate", "ru": "Врата Штейна", "en": "Steins;Gate", "studio": "White Fox",
+      "aliases": ["врата штейна", "steins gate", "steins;gate", "окабе", "курису", "маюри"],
+      "genres": ["Sci-Fi", "Drama"],
+      "moments": [
+        {"title": "Окабе спасает Курису", "episode": "24 серия", "query": "Врата штейна Окабе спасает Курису", "query_en": "okabe saves kurisu", "hook": "Он прожил этот день тысячи раз", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "evangelion", "ru": "Евангелион", "en": "Neon Genesis Evangelion", "studio": "Gainax",
+      "aliases": ["евангелион", "evangelion", "синдзи", "аска", "рей", "ева-01"],
+      "genres": ["Mecha", "Drama"],
+      "moments": [
+        {"title": "Берсерк Евы-01", "episode": "19 серия", "query": "Евангелион Ева 01 берсерк", "query_en": "eva 01 berserk scene", "hook": "Робот, который проснулся сам", "mood": "dark"}
+      ]
+    },
+    {
+      "key": "spy x family", "ru": "Семья шпиона", "en": "Spy x Family", "studio": "WIT Studio / CloverWorks",
+      "aliases": ["семья шпиона", "spy x family", "аня", "anya", "лойд", "йор", "yor", "бонд"],
+      "genres": ["Comedy", "Action"],
+      "moments": [
+        {"title": "Аня: «Хе»", "episode": "1 сезон", "query": "Аня хе сцена семья шпиона", "query_en": "anya heh scene", "hook": "Самое милое лицо интернета", "mood": "funny"},
+        {"title": "Йор против убийц", "episode": "1 сезон, 25 серия", "query": "Йор бой на корабле", "query_en": "yor cruise ship fight", "hook": "Мама, которую лучше не злить", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "kaguya-sama", "ru": "Госпожа Кагуя: в любви как на войне", "en": "Kaguya-sama: Love Is War", "studio": "A-1 Pictures",
+      "aliases": ["госпожа кагуя", "kaguya", "кагуя", "чика", "chika", "сироганэ"],
+      "genres": ["Comedy", "Romance"],
+      "moments": [
+        {"title": "Танец Чики", "episode": "1 сезон, 3 серия", "query": "Танец Чики", "query_en": "chika dance", "hook": "Танец, который знает весь интернет", "mood": "funny"}
+      ]
+    },
+    {
+      "key": "grand blue", "ru": "Необъятный океан", "en": "Grand Blue Dreaming", "studio": "Zero-G",
+      "aliases": ["необъятный океан", "гран блю", "grand blue", "иори", "кохей"],
+      "genres": ["Comedy"],
+      "moments": [
+        {"title": "Лучшие реакции Иори", "episode": "1 сезон", "query": "Необъятный океан смешные моменты", "query_en": "grand blue funniest moments", "hook": "Самое смешное аниме десятилетия", "mood": "funny"}
+      ]
+    },
+    {
+      "key": "kaiju no. 8", "ru": "Кайдзю номер восемь", "en": "Kaiju No. 8", "studio": "Production I.G",
+      "aliases": ["кайдзю номер восемь", "кайдзю №8", "kaiju no 8", "kaiju no. 8", "кафка", "кафка хибино", "мина"],
+      "genres": ["Action", "Sci-Fi"],
+      "moments": [
+        {"title": "Первое превращение Кафки", "episode": "1 сезон, 1 серия", "query": "Кайдзю номер 8 первое превращение Кафки", "query_en": "kafka first transformation kaiju no 8", "hook": "Ему 32, и он стал монстром", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "dandadan", "ru": "Дандадан", "en": "Dan Da Dan", "studio": "Science SARU",
+      "aliases": ["дандадан", "dandadan", "dan da dan", "окарун", "момо", "турбо бабка", "turbo granny"],
+      "genres": ["Action", "Comedy"],
+      "moments": [
+        {"title": "Погоня Турбо-бабки", "episode": "1 сезон, 2 серия", "query": "Дандадан погоня турбо бабка", "query_en": "dandadan turbo granny chase", "hook": "Самая безумная погоня в аниме", "mood": "funny"},
+        {"title": "История Акробатического Шёлка", "episode": "1 сезон, 7 серия", "query": "Дандадан 7 серия акробатический шелк", "query_en": "dandadan episode 7 acrobatic silky", "hook": "Серия, после которой все плакали", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "blue lock", "ru": "Синяя тюрьма", "en": "Blue Lock", "studio": "8bit",
+      "aliases": ["синяя тюрьма", "блю лок", "blue lock", "исаги", "isagi", "бачира", "рин итоши"],
+      "genres": ["Sports"],
+      "moments": [
+        {"title": "Прямой удар Исаги", "episode": "1 сезон", "query": "Исаги гол синяя тюрьма", "query_en": "isagi direct shot goal", "hook": "Эгоизм, который побеждает", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "haikyu", "ru": "Волейбол!!", "en": "Haikyu!!", "studio": "Production I.G",
+      "aliases": ["волейбол", "haikyu", "хайкью", "хината", "кагеяма", "ойкава", "карасуно"],
+      "genres": ["Sports"],
+      "moments": [
+        {"title": "Быстрая атака Хинаты и Кагеямы", "episode": "1 сезон", "query": "Хината Кагеяма быстрая атака", "query_en": "hinata kageyama freak quick", "hook": "Самый маленький игрок на площадке", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "oshi no ko", "ru": "Звёздное дитя", "en": "Oshi no Ko", "studio": "Doga Kobo",
+      "aliases": ["звездное дитя", "звёздное дитя", "oshi no ko", "ай хошино", "аква", "руби"],
+      "genres": ["Drama"],
+      "moments": [
+        {"title": "Финал первой серии", "episode": "1 сезон, 1 серия", "query": "Звездное дитя финал первой серии Ай", "query_en": "oshi no ko episode 1 ending ai", "hook": "90 минут, которые шокировали всех", "mood": "twist"}
+      ]
+    },
+    {
+      "key": "cyberpunk edgerunners", "ru": "Киберпанк: Бегущие по краю", "en": "Cyberpunk: Edgerunners", "studio": "Trigger",
+      "aliases": ["киберпанк бегущие по краю", "edgerunners", "cyberpunk", "дэвид", "люси", "david", "lucy"],
+      "genres": ["Sci-Fi", "Action"],
+      "moments": [
+        {"title": "Люси и Луна", "episode": "Финал", "query": "Бегущие по краю Люси луна финал", "query_en": "edgerunners lucy moon ending", "hook": "Она всё-таки полетела на Луну", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "sakamoto days", "ru": "Дни Сакамото", "en": "Sakamoto Days", "studio": "TMS Entertainment",
+      "aliases": ["дни сакамото", "sakamoto days", "сакамото", "шин"],
+      "genres": ["Action", "Comedy"],
+      "moments": [
+        {"title": "Сакамото в деле", "episode": "1 сезон", "query": "Дни Сакамото бой в магазине", "query_en": "sakamoto days fight scene", "hook": "Пухлый продавец — легенда киллеров", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "violet evergarden", "ru": "Вайолет Эвергарден", "en": "Violet Evergarden", "studio": "Kyoto Animation",
+      "aliases": ["вайолет эвергарден", "violet evergarden", "вайолет", "гилберт"],
+      "genres": ["Drama"],
+      "moments": [
+        {"title": "Письма для Энн", "episode": "10 серия", "query": "Вайолет Эвергарден 10 серия письма", "query_en": "violet evergarden episode 10 letters", "hook": "Серия, после которой плачут все", "mood": "emotional"}
+      ]
+    },
+    {
+      "key": "black clover", "ru": "Чёрный клевер", "en": "Black Clover", "studio": "Studio Pierrot",
+      "aliases": ["черный клевер", "чёрный клевер", "black clover", "аста", "asta", "юно", "ями"],
+      "genres": ["Action", "Fantasy"],
+      "moments": [
+        {"title": "Аста: режим чёрного демона", "episode": "1 сезон", "query": "Аста режим черного демона", "query_en": "asta black form", "hook": "Без магии — но сильнее всех", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "berserk", "ru": "Берсерк", "en": "Berserk", "studio": "OLM",
+      "aliases": ["берсерк", "berserk", "гатс", "guts", "гриффит", "griffith", "затмение"],
+      "genres": ["Action", "Horror"],
+      "moments": [
+        {"title": "Затмение", "episode": "1997, 25 серия", "query": "Берсерк затмение сцена", "query_en": "berserk eclipse scene", "hook": "Предательство, которое не простить", "mood": "dark"}
+      ]
+    },
+    {
+      "key": "mushoku tensei", "ru": "Реинкарнация безработного", "en": "Mushoku Tensei: Jobless Reincarnation", "studio": "Studio Bind",
+      "aliases": ["реинкарнация безработного", "mushoku tensei", "рудеус", "эрис", "сильфи", "рокси", "орстед"],
+      "genres": ["Fantasy", "Drama"],
+      "moments": [
+        {"title": "Рудеус против Орстеда", "episode": "1 сезон", "query": "Рудеус против Орстеда", "query_en": "rudeus vs orsted", "hook": "Против бога дракона без шансов", "mood": "epic"}
+      ]
+    },
+    {
+      "key": "dr. stone", "ru": "Доктор Стоун", "en": "Dr. Stone", "studio": "TMS Entertainment",
+      "aliases": ["доктор стоун", "dr. stone", "dr stone", "сенку", "хром"],
+      "genres": ["Sci-Fi", "Adventure"],
+      "moments": [
+        {"title": "Сэнку и кола", "episode": "1 сезон", "query": "Доктор Стоун кола", "query_en": "dr stone cola scene", "hook": "Наука на 10 миллиардов процентов", "mood": "funny"}
+      ]
+    }
+  ],
+  "genre_templates": {
+    "Action": [{"q": "лучший бой", "q_en": "best fight scene", "hook": "Самый эпичный бой в {anime}", "mood": "epic"}, {"q": "трансформация", "q_en": "transformation scene", "hook": "Эта форма изменила всё", "mood": "epic"}, {"q": "финальная битва", "q_en": "final battle", "hook": "Финальная битва {anime}", "mood": "epic"}],
+    "Romance": [{"q": "признание", "q_en": "confession scene", "hook": "Признание, которое ждали все", "mood": "romantic"}, {"q": "милый момент", "q_en": "cute moment", "hook": "Слишком мило, чтобы пролистать", "mood": "romantic"}],
+    "Horror": [{"q": "жуткий момент", "q_en": "scariest moment", "hook": "Не смотри это ночью", "mood": "dark"}, {"q": "поворот сюжета", "q_en": "plot twist", "hook": "Никто не ожидал", "mood": "twist"}],
+    "Comedy": [{"q": "смешной момент", "q_en": "funniest scene", "hook": "Я не мог перестать смеяться", "mood": "funny"}, {"q": "мем момент", "q_en": "meme moment", "hook": "Сцена, ставшая мемом", "mood": "funny"}],
+    "Drama": [{"q": "грустная сцена", "q_en": "saddest scene", "hook": "Сцена, после которой плачут", "mood": "emotional"}, {"q": "предательство", "q_en": "betrayal scene", "hook": "Предательство, которое не простить", "mood": "dark"}],
+    "Fantasy": [{"q": "магия сцена", "q_en": "magic scene", "hook": "Магия, от которой мурашки", "mood": "epic"}],
+    "Sci-Fi": [{"q": "эпичная сцена", "q_en": "epic scene", "hook": "Будущее, которое пугает", "mood": "epic"}],
+    "Sports": [{"q": "решающий момент", "q_en": "clutch moment", "hook": "Последняя секунда матча", "mood": "epic"}],
+    "Mystery": [{"q": "раскрытие тайны", "q_en": "reveal scene", "hook": "Вот кто стоял за всем", "mood": "twist"}],
+    "Thriller": [{"q": "гениальный ход", "q_en": "genius move", "hook": "Он всё просчитал заранее", "mood": "twist"}],
+    "Supernatural": [{"q": "пробуждение силы", "q_en": "power awakening", "hook": "Сила, которую скрывали", "mood": "epic"}]
+  },
+  "mood_music": {
+    "epic": "epic_orchestral",
+    "dark": "phonk_bass",
+    "twist": "phonk_bass",
+    "emotional": "lofi_chill",
+    "romantic": "lofi_chill",
+    "funny": "none"
+  }
+}
