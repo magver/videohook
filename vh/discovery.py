@@ -513,10 +513,22 @@ def download(url: str, section: Optional[Tuple[float, float]] = None, name_hint:
     tmpl = str(SOURCES_DIR / f"{stem}_%(id)s{suffix}.%(ext)s")
 
     def hook(d):
-        if progress and d.get("status") == "downloading":
+        if not progress:
+            return
+        if d.get("status") == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             got = d.get("downloaded_bytes") or 0
-            progress(min(0.99, got / total) if total else 0.3, "Загрузка…")
+            speed = d.get("speed") or 0
+            eta = d.get("eta")
+            parts = [f"{got / 1048576:.1f}" + (f" из {total / 1048576:.1f} МБ" if total else " МБ")]
+            if speed:
+                parts.append(f"{speed / 1048576:.1f} МБ/с")
+            if eta:
+                parts.append(f"осталось ~{int(eta)} c")
+            frac = min(0.99, got / total) if total else min(0.9, got / (60 * 1048576))
+            progress(frac, "Скачиваю: " + " · ".join(parts))
+        elif d.get("status") == "finished":
+            progress(0.99, "Склеиваю видео и звук…")
 
     opts: Dict[str, Any] = {
         **_base_opts(),

@@ -38,7 +38,29 @@ nav a.active i { color: var(--accent); }
 .bar > span { display: block; height: 100%; background: var(--accent); transition: width .3s; }
 
 /* main */
-main { overflow: auto; padding: 22px 28px 60px; }
+.mainwrap { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
+main { overflow: auto; padding: 22px 28px 60px; flex: 1; min-height: 0; }
+/* полоса активности: всё, что сейчас делает программа */
+.activity { display: flex; flex-direction: column; gap: 6px; padding: 0 28px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.activity:empty { display: none; }
+.activity .act { display: grid; grid-template-columns: 22px 1fr auto; gap: 4px 10px; align-items: center; padding: 10px 0; }
+.activity .act + .act { border-top: 1px solid var(--line); }
+.activity .act b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity .act .msg { grid-column: 2 / 4; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity .act .pct { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; color: var(--accent); }
+.activity .act .bigbar { grid-column: 1 / 4; }
+.bigbar { height: 8px; background: var(--line); border-radius: 6px; overflow: hidden; position: relative; }
+.bigbar > span { display: block; height: 100%; background: var(--accent); transition: width .6s ease; border-radius: 6px; }
+.bigbar.busy::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.28), transparent);
+  animation: sweep 1.4s linear infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.clip-task { border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; background: var(--panel2); display: grid; gap: 6px; }
+.clip-task:empty { display: none; }
+.clip-task .row b { font-size: 14px; }
+.score { font-weight: 800; border-radius: 8px; padding: 2px 8px; font-size: 12px; }
+.score.hi { background: #16a34a; color: #fff; } .score.mid { background: #ca8a04; color: #111; } .score.lo { background: #3f3f46; color: #e4e4e7; }
+.savebar { position: sticky; bottom: 0; z-index: 5; display: flex; gap: 10px; align-items: center; justify-content: flex-end;
+  padding: 12px 16px; margin-top: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 .head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
 .head .sub { color: var(--muted); }
 .head .spacer { flex: 1; }

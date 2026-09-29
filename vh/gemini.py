@@ -120,7 +120,8 @@ def upload_file(path: str | Path, wait: bool = True) -> Dict[str, Any]:
 
 
 def generate(prompt: str, want_json: bool = True, temperature: float = 0.7,
-             local_paths: Optional[List[str]] = None, task_name: str = "ai", progress=None) -> Any:
+             local_paths: Optional[List[str]] = None, task_name: str = "ai", progress=None,
+             chat: Optional[Dict[str, Any]] = None) -> Any:
     """Генерация: сначала Antigravity, при недоступности или ошибке — Gemini API.
 
     local_paths — файлы (видео, раскадровка), которые должна посмотреть модель.
@@ -129,7 +130,8 @@ def generate(prompt: str, want_json: bool = True, temperature: float = 0.7,
     if _use_antigravity():
         try:
             return agbridge.run_task(task_name, prompt, expect="json" if want_json else "text",
-                                     files=local_paths, timeout=900 if local_paths else 420, progress=progress)
+                                     files=local_paths, timeout=1500 if local_paths else 480, progress=progress,
+                                     chat=chat)
         except agbridge.AntigravityError as exc:
             log.warning("Antigravity %s: %s", task_name, exc)
             errors.append(f"Antigravity: {exc}")
@@ -197,7 +199,7 @@ def suggest_moments(anime_name: str, known_titles: List[str], count: int = 5,
 Для каждой сцены верни объект:
 {{"title": "короткое название сцены на русском", "episode": "сезон/серия или арка", "query": "запрос для YouTube на русском",
 "query_en": "YouTube search query in English: <anime title> <characters> <action> scene", "hook": "цепляющий заголовок до 45 символов без эмодзи",
-"mood": "{MOODS}", "why": "почему это залетит (1 фраза)"}}
+"mood": "{MOODS}", "why": "почему это залетит (1 фраза)", "virality": "шанс успеха шортса 0–100, строго"}}
 Верни JSON-объект {{"moments": [...]}}."""
     data = parse_json(generate(prompt, temperature=0.9, task_name="moments"))
     items = data.get("moments", []) if isinstance(data, dict) else data
@@ -206,66 +208,78 @@ def suggest_moments(anime_name: str, known_titles: List[str], count: int = 5,
 
 def analyze_video(path: str | Path, context: str, target_seconds: int = 35, mood: str = "",
                   hook: str = "", hints: Optional[List[Dict[str, Any]]] = None,
-                  storyboard: Optional[str] = None, audio: Optional[str] = None, max_seconds: int = 58,
-                  ru_audio: bool = False, progress=None) -> Dict[str, Any]:
-    """Смысловой разбор видео: цельный отрезок-история, акценты, замедление, субтитры, хук, идеи монтажа."""
-    lo, hi = max(15, target_seconds - 10), max_seconds
+                  storyboard: Optional[Any] = None, audio: Optional[str] = None, max_seconds: int = 58,
+                  ru_audio: bool = False, progress=None, chat: Optional[Dict[str, Any]] = None,
+                  duration: float = 0.0, min_seconds: int = 35) -> Dict[str, Any]:
+    """Глубокий разбор исходника: смысловая карта (биты) всего файла, кульминация, акценты, субтитры, хук.
+
+    Какие куски войдут в ролик, решает vh.scenes.plan_from_beats — по принципу «максимум, сокращаем пустое»."""
+    sheets = storyboard if isinstance(storyboard, list) else ([storyboard] if storyboard else [])
     hint_txt = ""
     if hints:
-        rows = [f"  - {h['start']:.0f}–{h['end']:.0f} c ({ {'heatmap': 'зрители YouTube пересматривают чаще всего', 'local': 'пик громкости и динамики монтажа'}.get(h.get('source'), h.get('source', '')) })"
+        names = {"heatmap": "зрители YouTube пересматривают чаще всего", "local": "пик громкости и динамики монтажа"}
+        rows = [f"  - {h['start']:.0f}–{h['end']:.0f} c ({names.get(h.get('source'), h.get('source', ''))})"
                 for h in hints[:4]]
-        hint_txt = ("Объективные сигналы — где находится пик интереса (кульминация). Отрезок должен ВКЛЮЧАТЬ пик "
-                    "вместе с его завязкой и развязкой, а не начинаться с него:\n" + "\n".join(rows) + "\n")
-    media = []
-    if storyboard:
-        media.append("раскадровка 4×4 (кадры слева направо, сверху вниз, равномерно по времени)")
-    if audio:
-        media.append("аудиодорожка WAV того же файла — слушай её для реплик и субтитров")
-    media_txt = ("Дополнительно даны: " + "; ".join(media) + ".\n") if media else ""
-    subs_rule = ("Звук на русском (русская озвучка): субтитры — точная расшифровка русской речи."
+        hint_txt = "Объективные сигналы интереса зрителей (проверь, совпадают ли с кульминацией):\n" + "\n".join(rows)
+    subs_rule = ("Звук на русском (русская озвучка): субтитры — точная расшифровка речи."
                  if ru_audio else
-                 "Если речь не на русском — переведи на естественный разговорный русский (не дословно), "
-                 "сохраняя смысл, характер персонажа и длину фразы.")
-    prompt = f"""Проанализируй видео — это фрагмент аниме ({context}).
-Настроение сцены: {mood or 'определи сам'}.{f' Рабочий хук: «{hook}».' if hook else ''}
-{media_txt}
-ЗАДАЧА: выбрать отрезок для вертикального ролика, который зритель поймёт БЕЗ контекста и досмотрит до конца.
-Длина {lo}–{hi} c: бери столько, сколько нужно для законченной истории, не укорачивай ради цифры.
-
-Правила выбора границ (самое важное):
-1. Отрезок — законченная мини-история: завязка (кто, что происходит, 2–6 c) → нарастание → кульминация → развязка/реакция.
-2. НАЧАЛО — на смене плана или в паузе ПЕРЕД первой репликой завязки. Никогда не начинай посреди фразы или движения.
-3. КОНЕЦ — после последней реплики и реакции на кульминацию (взгляд, падение, тишина, реакция других героев),
-   на смене плана или в паузе. Никогда не обрывай фразу, удар или музыкальную фразу. Лучше на 3 c длиннее, чем обрезать суть.
-4. Если сцена длиннее {hi} c — не режь её пополам: верни 2–4 части ("parts"), выбросив затянутую середину
-   (повторы, долгие проходы, флешбеки), но сохранив завязку и финал. Каждая часть тоже начинается и заканчивается на границе фразы.
-5. Избегай заставок, титров, превью следующей серии, чёрных кадров, чужих водяных знаков на весь экран.
+                 "Речь не на русском — переводи на живой разговорный русский: смысл, характер и эмоция персонажа важнее "
+                 "дословности; имена — в принятой русской транскрипции; длина фразы примерно как у оригинала.")
+    media = []
+    if sheets:
+        media.append(f"раскадровки ({len(sheets)} шт.): кадр каждую секунду, таймкод в левом верхнем углу каждого кадра — "
+                     "по ним определяй время событий с точностью до секунды")
+    if audio:
+        media.append("WAV-дорожка файла — прослушай её ЦЕЛИКОМ: реплики, интонации, удары, музыка, тишина")
+    media.append("само видео (если инструмент позволяет его открыть)")
+    prompt = f"""Ты — опытный монтажёр вирусных аниме-шортсов и сценарист. Перед тобой исходник: {context}.
+Длительность файла: {duration:.1f} c. Настроение по базе: {mood or 'не задано'}.{f' Рабочий хук: «{hook}».' if hook else ''}
+Материалы: {'; '.join(media)}.
 {hint_txt}
-Монтаж (время — в секундах от начала этого файла):
-- "accents": 2–6 ударных моментов (удар, взрыв, резкий поворот головы, ключевое слово) — туда встанут панч-зум, вспышка и низкий удар звука;
-- "slowmo": один момент кульминации для замедления (t — центр, dur 0.8–1.6 c), или null, если замедление убьёт сцену (диалог, комедия);
-- "transition": переход между частями — fadewhite (эпик), fadeblack (мрак, драма), dissolve (эмоции), zoomin (поворот), slideleft (комедия), cut;
-- музыку не предлагай: используется родной звук сцены.
 
-Субтитры: "subtitles" — ВСЕ реплики внутри выбранного отрезка (всех частей), по одной фразе, start/end по речи.
-{subs_rule} Если речи нет — пустой список. "dialogue_heavy": true, если сцена держится на диалоге.
-Тон хука/подписи: {_voice(mood)}.
+Цель: ролик {min_seconds}–{max_seconds} c, который зритель без контекста ПОЙМЁТ и досмотрит. Главная ошибка, которой нельзя
+допустить: обрезанная завязка, выброшенные реплики, оборванный финал. Длинный цельный ролик лучше короткого рваного.
+Монтажные решения (что оставить) примет программа по твоей разметке — поэтому разметка должна быть честной и подробной.
 
-Верни JSON:
-{{"parts": [{{"start": сек, "end": сек}}] (1–4 части по порядку; одна часть, если сцена укладывается),
- "segments": [{{"start": сек, "end": сек, "score": 0..1, "reason": "почему"}}] (до 3 альтернатив цельных отрезков, по убыванию score; первый = охват parts),
- "story": "одной фразой: завязка → кульминация → развязка",
- "hook": "заголовок-хук до 45 символов без эмодзи",
- "caption": "короткая подпись/контекст на русском для экрана, до 70 символов",
- "accents": [сек, ...],
- "slowmo": {{"t": сек, "dur": сек}} или null,
- "transition": "…",
- "subtitles": [{{"start": сек, "end": сек, "text": "реплика на русском"}}],
- "dialogue_heavy": true/false,
- "edit_ideas": ["что ещё сделать в монтаже"],
- "mood": "{MOODS}"}}"""
-    local = [str(path)] + [p for p in (storyboard, audio) if p]
-    data = parse_json(generate(prompt, local_paths=local, temperature=0.3, task_name="analyze", progress=progress))
+ШАГ 1. Восприятие. Просмотри ВСЕ раскадровки по порядку и прослушай звук целиком. Не пропускай середину файла.
+Выпиши для себя: кто в кадре, что происходит, кто что говорит, где звучат удары/крики/музыка, где тишина.
+
+ШАГ 2. Смысловая карта ("beats"). Раздели ВЕСЬ файл от 0 до {duration:.1f} c на последовательные биты по 2–10 c, БЕЗ пропусков и
+перекрытий (конец одного = начало следующего). Граница бита — смена плана, конец фразы или смена действия.
+Для каждого бита:
+  - "what": что происходит (конкретно: «Гай открывает восьмые врата, вокруг пар», а не «сцена боя»);
+  - "speech": true, если в бите звучит реплика (любая речь персонажей). Не путай с криками без слов;
+  - "line": реплика на русском (если есть);
+  - "importance" 0–10: насколько бит нужен, чтобы понять историю (завязка, мотив, ключевая фраза — высокая);
+  - "intensity" 0–10: динамика и эмоция (удары, движение камеры, крик, слёзы — высокая; статичный кадр, тишина — низкая);
+  - "role": intro_outro (заставка, титры, превью серии, логотипы) | setup (завязка: кто и почему) | build (нарастание) |
+    climax (кульминация) | payoff (развязка, итог) | reaction (реакция героев на произошедшее) | filler (проход, пауза без смысла).
+Оценки ставь по смыслу. Диалог, раскрывающий мотив героя, — важен, даже если в кадре ничего не двигается.
+
+ШАГ 3. Режиссура.
+  - "peak": секунда главной кульминации;
+  - "story": одной фразой завязка → кульминация → развязка;
+  - "accents": 4–10 секунд ударных моментов по всему файлу (удар, вспышка силы, резкий поворот, ключевое слово) —
+    туда встанут панч-зум, вспышка и звуковой удар; распредели их по всему действию, а не только в кульминации;
+  - "slowmo": {{"t": секунда, "dur": 0.8–1.6}} — один самый зрелищный момент для замедления или null (диалог, комедия);
+  - "hook": заголовок до 45 символов без эмодзи; тон: {_voice(mood)};
+  - "caption": короткий контекст для зрителя без спойлера, до 70 символов;
+  - "subtitles": ВСЕ реплики файла по одной фразе с точными start/end по звуку. {subs_rule} Если речи нет — [];
+  - "dialogue_heavy": true, если сцена держится на диалоге;
+  - "mood": {MOODS};
+  - "virality": 0–100 — шанс, что ролик залетит (узнаваемость сцены, эмоция, понятность без контекста, хук);
+  - "virality_why": одна фраза почему;
+  - "edit_ideas": 3–6 конкретных идей монтажа с секундами.
+
+Верни ОДИН JSON:
+{{"beats": [{{"start": 0.0, "end": 4.5, "what": "…", "speech": false, "line": "", "importance": 5, "intensity": 3, "role": "setup"}}, …],
+ "peak": 0.0, "story": "…", "accents": [0.0, …], "slowmo": {{"t": 0.0, "dur": 1.2}} или null,
+ "hook": "…", "caption": "…", "subtitles": [{{"start": 0.0, "end": 0.0, "text": "…"}}], "dialogue_heavy": false,
+ "mood": "…", "virality": 0, "virality_why": "…", "edit_ideas": ["…"]}}
+Все времена — секунды от начала этого файла."""
+    local = [str(path)] + [str(x) for x in sheets] + ([audio] if audio else [])
+    data = parse_json(generate(prompt, local_paths=local, temperature=0.3, task_name="analyze", progress=progress,
+                               chat=chat))
     if not isinstance(data, dict):
         raise RuntimeError("Gemini вернул неожиданный формат анализа")
 
@@ -276,20 +290,26 @@ def analyze_video(path: str | Path, context: str, target_seconds: int = 35, mood
             return None
         return (st, en) if en > st else None
 
+    from .scenes import normalize_beats, plan_from_beats
+
+    beats = [dict(b, start=sp[0], end=sp[1]) for b in data.get("beats") or [] if isinstance(b, dict)
+             for sp in [_span(b)] if sp]
+    dur = duration or max((b["end"] for b in beats), default=0.0)
+    beats = normalize_beats(beats, dur)
+    try:
+        peak = float(data.get("peak")) if data.get("peak") is not None else None
+    except (TypeError, ValueError):
+        peak = None
+    plan = plan_from_beats(beats, dur, peak, min_len=min_seconds, max_len=max_seconds) if beats else {"parts": []}
+    parts = plan.get("parts") or []
     segs = []
-    for s in data.get("segments") or []:
-        sp = _span(s)
-        if sp:
-            segs.append({"start": round(sp[0], 2), "end": round(sp[1], 2), "score": float(s.get("score", 0.8)),
-                         "source": "gemini", "reason": s.get("reason", "Gemini")})
-    parts = [sp for sp in (_span(p) for p in data.get("parts") or []) if sp]
-    parts.sort()
     if parts:
-        whole = {"start": round(parts[0][0], 2), "end": round(parts[-1][1], 2), "score": 1.0, "source": "gemini",
-                 "reason": data.get("story") or "Цельная история по Gemini"}
-        segs = [whole] + [s for s in segs if abs(s["start"] - whole["start"]) > 1 or abs(s["end"] - whole["end"]) > 1]
+        segs.append({"start": parts[0][0], "end": parts[-1][1], "score": 1.0, "source": "gemini",
+                     "reason": data.get("story") or "Цельная сцена по смысловой карте Gemini"})
+    data["beats"] = beats
+    data["plan_removed"] = plan.get("removed", [])
     data["segments"] = segs
-    data["parts"] = [[round(a, 2), round(b, 2)] for a, b in parts]
+    data["parts"] = parts
     subs = []
     for x in data.get("subtitles") or []:
         sp = _span(x)
@@ -308,10 +328,43 @@ def analyze_video(path: str | Path, context: str, target_seconds: int = 35, mood
         data["slowmo"] = {"t": float(sm["t"]), "dur": max(0.6, min(2.0, float(sm.get("dur", 1.2)))), "factor": 0.5} if sm else None
     except (KeyError, TypeError, ValueError):
         data["slowmo"] = None
+    try:
+        data["virality"] = max(0, min(100, int(float(data.get("virality")))))
+    except (TypeError, ValueError):
+        data["virality"] = None
     return data
 
 
-def translate_subtitles(items: List[Dict[str, Any]], context: str, lang: str = "") -> List[Dict[str, Any]]:
+def rate_moments(anime_name: str, genres: List[str], items: List[Dict[str, Any]], trend: Dict[str, Any],
+                 progress=None) -> Dict[str, Dict[str, Any]]:
+    """Шанс успеха шортса по каждому моменту: 0–100 и короткое объяснение."""
+    rows = [{"id": m["id"], "title": m.get("title"), "episode": m.get("episode", ""), "mood": m.get("mood", ""),
+             "why": m.get("why", ""), "views_source": m.get("views") or 0, "used_before": bool(m.get("used"))}
+            for m in items]
+    trend_txt = (f"Популярность на AniList: {trend.get('popularity', 'н/д')}, тренд: {trend.get('trending', 'н/д')}, "
+                 f"рейтинг {trend.get('score', 'н/д')}, сейчас выходит: {'да' if trend.get('airing') else 'нет'}."
+                 if trend else "Данных трендов нет — оцени по своей информации о популярности тайтла.")
+    prompt = f"""Ты — аналитик вирусного аниме-контента в TikTok, Reels и YouTube Shorts (русскоязычная аудитория).
+Тайтл: «{anime_name}» (жанры: {', '.join(genres or []) or 'н/д'}). {trend_txt}
+
+Оцени для каждой сцены шанс, что вертикальный ролик 35–58 c с ней наберёт заметно больше просмотров, чем среднее по каналу.
+Учитывай (по убыванию веса):
+1. узнаваемость и культовость сцены (её ищут, пересматривают, цитируют; мемы);
+2. эмоциональный пик и зрелищность, которые считываются в первые 2 секунды;
+3. понятность без контекста (сцена самодостаточна за 40–60 c);
+4. актуальность тайтла сейчас (новый сезон, тренд, годовщина);
+5. насыщенность: сцену уже залили тысячи каналов — шанс ниже; редкая, но сильная — выше;
+6. риск спойлера для текущей аудитории и потенциал комментариев/споров.
+Будь строгим: 80+ — только культовые сцены на пике популярности; 50–70 — хорошая сцена; ниже 40 — слабая или заезженная.
+Сцены: {json.dumps(rows, ensure_ascii=False)}
+Верни JSON: {{"scores": [{{"id": "…", "score": 0, "why": "одна фраза: главный фактор"}}]}}"""
+    data = parse_json(generate(prompt, temperature=0.3, task_name="rate", progress=progress))
+    lst = data.get("scores", []) if isinstance(data, dict) else data
+    return {str(x["id"]): x for x in lst or [] if isinstance(x, dict) and x.get("id") is not None}
+
+
+def translate_subtitles(items: List[Dict[str, Any]], context: str, lang: str = "",
+                        chat: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Перевод субтитров на русский с сохранением таймингов (для роликов без русской озвучки)."""
     if not items:
         return []
@@ -322,13 +375,14 @@ def translate_subtitles(items: List[Dict[str, Any]], context: str, lang: str = "
 Строк столько же, сколько на входе, те же номера i.
 Вход: {json.dumps(rows, ensure_ascii=False)}
 Верни JSON: {{"lines": [{{"i": 0, "text": "перевод"}}, ...]}}"""
-    data = parse_json(generate(prompt, temperature=0.3, task_name="subtitles"))
+    data = parse_json(generate(prompt, temperature=0.3, task_name="subtitles", chat=chat))
     lines = data.get("lines", []) if isinstance(data, dict) else data
     tr = {int(x["i"]): str(x.get("text", "")).strip() for x in lines or [] if isinstance(x, dict) and "i" in x}
     return [{**x, "text": tr[i]} for i, x in enumerate(items) if tr.get(i)]
 
 
-def write_captions(clip: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, Any]:
+def write_captions(clip: Dict[str, Any], settings: Dict[str, Any],
+                   chat: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Описания под каждую площадку (с учётом их лимитов и настроения сцены)."""
     mood = clip.get("mood") or "epic"
     lines = "; ".join(k.get("text", "") for k in (clip.get("key_lines") or [])[:4] if isinstance(k, dict))
@@ -351,7 +405,7 @@ def write_captions(clip: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, 
  "tiktok": {{"caption": "до 300 символов, 4–6 хэштегов в конце"}},
  "instagram": {{"caption": "до 400 символов, 8–12 хэштегов в конце"}},
  "pinned_comment": "вопрос зрителям для закрепа"}}"""
-    data = parse_json(generate(prompt, temperature=0.8, task_name="captions"))
+    data = parse_json(generate(prompt, temperature=0.8, task_name="captions", chat=chat))
     if not isinstance(data, dict) or "youtube" not in data:
         raise RuntimeError("Gemini вернул неожиданный формат описаний")
     return data

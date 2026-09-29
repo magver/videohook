@@ -141,7 +141,11 @@ def prepare_captions(clip_id: str, use_ai: bool = True) -> Dict[str, Any]:
     caps: Dict[str, Any]
     if use_ai and gemini.available():
         try:
-            caps = gemini.write_captions(clip, get_settings())
+            chat = library.clip_chat(clip)
+            try:
+                caps = gemini.write_captions(clip, get_settings(), chat=chat)
+            finally:
+                library.save_chat(clip_id, chat)
             caps["source"] = "gemini"
         except Exception as exc:  # noqa: BLE001
             log.warning("captions via Gemini failed: %s", exc)

@@ -143,6 +143,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "default_music": "none",                 # родной звук сцены; "auto" — музыка по настроению
     "music_volume": 0.22,
     "clip_max_seconds": 58,                  # верхняя граница: сцена не обрезается ради короткой длины
+    "clip_min_seconds": 35,                  # нижняя граница, если исходник позволяет (короче — теряется смысл)
+    "auto_rate_moments": True,               # ИИ оценивает шанс успеха новых моментов
     "loop_friendly": False,                  # True — короткий кроссфейд звука в конце для лупа
     "subtitles_mode": "auto",                # auto — русские субтитры, если есть реплики; off — без субтитров
     "prefer_ru_dub": True,                   # искать источник с русской озвучкой в первую очередь
@@ -318,10 +320,12 @@ def probe(path: str | Path) -> Dict[str, Any]:
 # Фоновые задачи с прогрессом
 # ---------------------------------------------------------------------------
 class Task:
-    def __init__(self, kind: str, title: str):
+    def __init__(self, kind: str, title: str, clip_id: str = ""):
         self.id = new_id("t_")
         self.kind = kind
         self.title = title
+        self.clip_id = clip_id
+        self.started = 0.0
         self.status = "queued"  # queued | running | done | error
         self.progress = 0.0
         self.message = "В очереди"
@@ -340,6 +344,7 @@ class Task:
     def as_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id, "kind": self.kind, "title": self.title, "status": self.status,
+            "clip_id": self.clip_id, "started": self.started,
             "progress": round(self.progress, 3), "message": self.message, "error": self.error,
             "result": self.result, "created": self.created, "updated": self.updated,
         }
@@ -351,8 +356,8 @@ class TaskManager:
         self.lock = threading.Lock()
         self.sem = threading.Semaphore(workers)
 
-    def submit(self, kind: str, title: str, fn: Callable[[Task], Any]) -> Task:
-        task = Task(kind, title)
+    def submit(self, kind: str, title: str, fn: Callable[[Task], Any], clip_id: str = "") -> Task:
+        task = Task(kind, title, clip_id)
         with self.lock:
             self.tasks[task.id] = task
             # не копим бесконечно
@@ -364,6 +369,7 @@ class TaskManager:
         def runner():
             with self.sem:
                 task.status = "running"
+                task.started = time.time()
                 task.update(message="Выполняется…")
                 try:
                     task.result = fn(task)
@@ -387,6 +393,19 @@ class TaskManager:
         if active_only:
             items = [t for t in items if t.status in ("queued", "running") or time.time() - t.updated < 20]
         return [t.as_dict() for t in sorted(items, key=lambda t: t.created, reverse=True)]
+
+
+class SubTask:
+    """Часть большой задачи: прогресс шага p∈[0,1] переводится в диапазон [lo, hi] общей шкалы."""
+
+    def __init__(self, task: Optional["Task"], lo: float, hi: float, prefix: str = ""):
+        self.task, self.lo, self.hi, self.prefix = task, lo, hi, prefix
+
+    def update(self, progress: Optional[float] = None, message: Optional[str] = None) -> None:
+        if not self.task:
+            return
+        p = None if progress is None else self.lo + (self.hi - self.lo) * max(0.0, min(1.0, progress))
+        self.task.update(p, (self.prefix + message) if message else None)
 
 
 tasks = TaskManager()

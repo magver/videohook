@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from .core import DATA_DIR, SEED_MOMENTS, JsonStore, tasks
+from .core import DATA_DIR, SEED_MOMENTS, JsonStore, get_settings, tasks
 
 log = logging.getLogger("videohook.moments")
 
@@ -136,7 +136,70 @@ def _decorate(m: Dict[str, Any]) -> Dict[str, Any]:
     out["last_used"] = u.get("last", 0)
     out["used"] = out["used_count"] > 0
     out.setdefault("music", mood_music(m.get("mood", "epic")))
+    sc = _scores().get(m["id"]) or {}
+    out["score"] = sc.get("score", m.get("score"))
+    out["score_why"] = sc.get("why", m.get("score_why", ""))
+    out["score_source"] = sc.get("source", "ai" if m.get("score") is not None else "")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Шанс успеха (оценка ИИ 0–100)
+# ---------------------------------------------------------------------------
+def _scores() -> Dict[str, Any]:
+    with _user.lock:
+        return _user.load().setdefault("scores", {})
+
+
+def set_score(anime_key: str, mid: str, score: Any, why: str = "", source: str = "ai") -> None:
+    try:
+        val = max(0, min(100, int(float(score))))
+    except (TypeError, ValueError):
+        return
+    with _user.lock:
+        _user.load().setdefault("scores", {})[mid] = {"score": val, "why": (why or "")[:240], "source": source,
+                                                       "t": time.time(), "anime": anime_key}
+        _user.save()
+
+
+def rate_anime(anime_key: str, task=None, only_missing: bool = False) -> Dict[str, Any]:
+    """ИИ оценивает шанс успеха каждого момента тайтла (вирусность шортса 0–100)."""
+    from . import gemini
+
+    a = _anime_index().get(anime_key)
+    if not a:
+        raise KeyError("Тайтл не найден")
+    items = [_decorate(m) for m in a["moments"]]
+    if only_missing:
+        items = [m for m in items if m.get("score") is None]
+    if not items:
+        return {"anime": anime_key, "rated": 0}
+    if task:
+        task.update(0.2, f"Gemini оценивает {len(items)} моментов…")
+    trend = next((t for t in (_user.load().get("trends", {}).get("TRENDING_DESC:30", {}) or {}).get("items", [])
+                  if t.get("key") == anime_key), {})
+    res = gemini.rate_moments(display_name(a), a.get("genres", []), items, trend,
+                              progress=(lambda msg: task.update(None, msg)) if task else None)
+    n = 0
+    for m in items:
+        r = res.get(m["id"])
+        if r:
+            set_score(anime_key, m["id"], r.get("score"), r.get("why", ""))
+            n += 1
+    if task:
+        task.update(1.0, f"{display_name(a)}: оценено {n} моментов")
+    return {"anime": anime_key, "rated": n}
+
+
+def rate_async(anime_key: str, only_missing: bool = True) -> Optional[str]:
+    from . import gemini
+
+    if not gemini.available():
+        return None
+    a = _anime_index().get(anime_key, {})
+    t = tasks.submit("rate", f"Шансы на успех: {display_name(a) if a else anime_key}",
+                     lambda tk: rate_anime(anime_key, tk, only_missing))
+    return t.id
 
 
 def mark_used(mid: str, anime_key: str, clip_id: str = "", auto_refill: bool = True) -> Dict[str, Any]:
@@ -223,6 +286,8 @@ def add_moments(anime_key: str, moments: List[Dict[str, Any]], meta: Optional[Di
                 "url": m.get("url") or "",
                 "views": m.get("views") or 0,
                 "source": source,
+                **({"score": max(0, min(100, int(float(m["virality"])))), "score_why": (m.get("why") or "")[:240]}
+                   if str(m.get("virality", "")).replace(".", "", 1).isdigit() else {}),
                 "added": time.time(),
             }
             ua.setdefault("moments", []).append(clean)
@@ -300,6 +365,8 @@ def refill(anime: Dict[str, Any], task=None) -> Dict[str, Any]:
         added += n
         sources.append(f"Шаблоны: +{n}")
 
+    if added and get_settings().get("auto_rate_moments", True):
+        rate_async(key, only_missing=True)
     msg = f"{name}: добавлено {added} ({', '.join(sources)})"
     if task:
         task.update(1.0, msg)

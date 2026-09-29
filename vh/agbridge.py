@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .core import JOBS_DIR, SUBPROCESS_FLAGS, get_settings, new_id
+from .core import DATA_DIR, JOBS_DIR, SUBPROCESS_FLAGS, JsonStore, get_settings, new_id
 
 log = logging.getLogger("videohook.agbridge")
 
@@ -184,11 +184,96 @@ def new_conversation(prompt: str, title: str, model: str = "") -> str:
     return cid
 
 
+def send_message(cid: str, content: str, title: str = "VideoHook") -> None:
+    agentapi(["send-message", f"--title={title[:80]}", cid, content], servers=ensure_running())
+
+
+# ---------------------------------------------------------------------------
+# Учёт и удаление диалогов: 1 клип = 1 чат, разовые задачи удаляются сразу
+# ---------------------------------------------------------------------------
+_chats = JsonStore(DATA_DIR / "ag_chats.json", {})
+RPC_PREFIX = "/exa.language_server_pb.LanguageServerService/"
+
+
+def _register(cid: str, owner: str) -> None:
+    with _chats.lock:
+        _chats.load()[cid] = {"owner": owner, "t": time.time()}
+        _chats.save()
+
+
+def _rpc(method: str, body: Dict[str, Any], timeout: int = 15) -> Dict[str, Any]:
+    """JSON-RPC (Connect) к language server Antigravity — для операций, которых нет в agentapi."""
+    import ssl
+    import urllib.request
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE  # локальный самоподписанный сертификат
+    last: Optional[Exception] = None
+    for srv in scan():
+        for port in srv["ports"]:
+            for scheme in ("http", "https"):
+                try:
+                    req = urllib.request.Request(
+                        f"{scheme}://127.0.0.1:{port}{RPC_PREFIX}{method}", data=json.dumps(body).encode("utf-8"),
+                        headers={"Content-Type": "application/json", "Connect-Protocol-Version": "1",
+                                 "x-codeium-csrf-token": srv["csrf"]})
+                    with urllib.request.urlopen(req, timeout=timeout,
+                                                context=ctx if scheme == "https" else None) as r:
+                        return json.loads(r.read() or b"{}")
+                except Exception as exc:  # noqa: BLE001
+                    last = exc
+    raise AntigravityError(f"RPC {method} недоступен: {last}")
+
+
+def delete_conversation(cid: str) -> bool:
+    """Удаляет диалог из Antigravity (чтобы список чатов не превращался в кашу)."""
+    try:
+        _rpc("DeleteCascadeTrajectory", {"cascadeId": cid})
+        ok = True
+    except AntigravityError as exc:
+        log.warning("Antigravity: не удалось удалить диалог %s: %s", cid, exc)
+        ok = False
+    if ok:
+        with _chats.lock:
+            _chats.load().pop(cid, None)
+            _chats.save()
+    return ok
+
+
+def delete_owner_chats(owner: str) -> int:
+    """Удаляет все диалоги владельца (клипа). Возвращает число удалённых."""
+    with _chats.lock:
+        cids = [c for c, v in _chats.load().items() if v.get("owner") == owner]
+    return sum(1 for c in cids if delete_conversation(c))
+
+
+def cleanup_stale(max_age_h: float = 12.0) -> int:
+    """Разовые диалоги, которые не удалились сразу (Antigravity был закрыт и т.п.)."""
+    with _chats.lock:
+        cids = [c for c, v in _chats.load().items()
+                if v.get("owner") == "oneshot" and time.time() - v.get("t", 0) > max_age_h * 3600]
+    return sum(1 for c in cids if delete_conversation(c))
+
+
 # ---------------------------------------------------------------------------
 # Задачи с ответом в файле
 # ---------------------------------------------------------------------------
 def transcript_path(cid: str) -> Path:
     return brain_dir() / cid / ".system_generated" / "logs" / "transcript.jsonl"
+
+
+def last_step(cid: str) -> int:
+    last = -1
+    try:
+        for line in transcript_path(cid).read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                last = max(last, int(json.loads(line).get("step_index", -1)))
+            except (ValueError, TypeError):
+                pass
+    except OSError:
+        pass
+    return last
 
 
 def extract_json(text: str) -> Any:
@@ -216,21 +301,23 @@ def _read_result(path: Path, expect: str) -> Optional[Any]:
 
 
 def wait_result(cid: str, result_path: Path, expect: str = "json", timeout: int = 600,
-                progress: Optional[Callable[[str], None]] = None) -> Any:
-    """Ждёт файл результата; параллельно разбирает transcript диалога."""
+                progress: Optional[Callable[[str], None]] = None, first_step: int = -1) -> Any:
+    """Ждёт файл результата; параллельно разбирает transcript диалога (шаги после first_step)."""
     deadline = time.time() + timeout
-    seen = -1
+    seen = first_step
     final_msg, final_at = "", 0.0
     tpath = transcript_path(cid)
     started = time.time()
+    steps = 0
     while time.time() < deadline:
         time.sleep(1.5)
         res = _read_result(result_path, expect)
         if res is not None:
             return res
+        elapsed = int(time.time() - started)
         if not tpath.exists():
             if progress:
-                progress(f"Antigravity: ожидание ответа… {int(time.time() - started)} c")
+                progress(f"Antigravity: ожидание ответа… {elapsed} c")
             continue
         try:
             lines = tpath.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -245,10 +332,12 @@ def wait_result(cid: str, result_path: Path, expect: str = "json", timeout: int 
             if step <= seen:
                 continue
             seen = step
+            steps += 1
             for tc in obj.get("tool_calls") or []:
                 args = tc.get("args") or {}
                 if progress:
-                    progress("Antigravity: " + str(args.get("toolSummary") or tc.get("name", "работает"))[:100])
+                    what = str(args.get("toolSummary") or tc.get("name", "работает"))[:90]
+                    progress(f"Antigravity · шаг {steps} · {elapsed} c: {what}")
                 target = str(args.get("TargetFile", "")).replace("\\", "/")
                 content = args.get("CodeContent")
                 if tc.get("name") == "write_to_file" and isinstance(content, str) and target.endswith(result_path.name):
@@ -261,6 +350,8 @@ def wait_result(cid: str, result_path: Path, expect: str = "json", timeout: int 
                     data = extract_json(final_msg)
                     if data:
                         return data
+        if progress and not final_at:
+            progress(f"Antigravity · шаг {steps} · {elapsed} c: думает…")
         if final_at and time.time() - final_at > 15:
             res = _read_result(result_path, expect)
             if res is not None:
@@ -272,33 +363,58 @@ def wait_result(cid: str, result_path: Path, expect: str = "json", timeout: int 
 
 
 def run_task(name: str, instructions: str, expect: str = "json", files: Optional[List[str]] = None,
-             timeout: int = 600, progress: Optional[Callable[[str], None]] = None) -> Any:
-    """Одна ИИ-задача в новом диалоге Antigravity. Возвращает JSON (dict/list) или текст."""
+             timeout: int = 600, progress: Optional[Callable[[str], None]] = None,
+             chat: Optional[Dict[str, Any]] = None) -> Any:
+    """ИИ-задача в Antigravity. Возвращает JSON (dict/list) или текст.
+
+    chat — чат клипа {"id": ..., "owner": clip_id}: первая задача создаёт его, следующие пишут туда же
+    (1 клип = 1 чат, чат удаляется после публикации). Без chat — разовый диалог, удаляется сразу."""
     with _lock:
         if not ensure_running(progress):
             raise AntigravityError("Antigravity не запущен и не найден на компьютере")
-        work = JOBS_DIR / "_ai" / new_id(f"{re.sub(r'[^A-Za-z0-9_]', '_', name)[:20]}_")
+        tag = new_id(f"{re.sub(r'[^A-Za-z0-9_]', '_', name)[:20]}_")
+        work = JOBS_DIR / "_ai" / tag
         work.mkdir(parents=True, exist_ok=True)
         ext = "json" if expect == "json" else "md"
-        result_path = work / f"result.{ext}"
+        result_path = work / f"result_{tag}.{ext}"
         instr_path = work / "instructions.md"
         body = [f"# VideoHook · {name}", ""]
         if files:
-            body += ["## Файлы для изучения (открой каждый инструментом `view_file`)",
+            body += ["## Файлы для изучения (открой КАЖДЫЙ инструментом `view_file`, картинки и звук — полностью)",
                      *[f"- `{Path(f).as_posix()}`" for f in files], ""]
         body += ["## Порядок работы",
-                 "1. Изучи задание ниже" + (" и перечисленные файлы." if files else "."),
+                 "1. Изучи задание ниже" + (" и все перечисленные файлы." if files else "."),
                  f"2. Запиши ответ инструментом `write_to_file` (Overwrite=true) строго в файл `{result_path.as_posix()}`"
                  + (" — только валидный JSON без markdown." if expect == "json" else "."),
-                 "3. Не вызывай `run_command`, не изучай посторонние файлы и код. Это независимая задача.",
+                 "3. Не вызывай `run_command`, не изучай посторонние файлы и код.",
                  "", "## Задание", instructions]
         instr_path.write_text("\n".join(body), encoding="utf-8")
-        prompt = (f"VideoHook task. Read {instr_path.as_posix()} with view_file"
-                  + (", then view the listed media files" if files else "")
+        prompt = (f"VideoHook task «{name}». Read {instr_path.as_posix()} with view_file"
+                  + (", then view ALL listed media files" if files else "")
                   + f", and write the answer to {result_path.as_posix()} using write_to_file with Overwrite=true. "
                     "Do NOT call run_command. Answer in Russian.")
-        if progress:
-            progress("Antigravity: создаю диалог…")
-        cid = new_conversation(prompt, f"VideoHook: {name}")
+        cid = (chat or {}).get("id") or ""
+        first = -1
+        if cid:
+            first = last_step(cid)
+            if progress:
+                progress("Antigravity: задача в чат клипа…")
+            try:
+                send_message(cid, prompt, f"VideoHook: {name}")
+            except AntigravityError as exc:
+                log.warning("чат %s недоступен (%s) — открываю новый", cid, exc)
+                cid, first = "", -1
+        if not cid:
+            if progress:
+                progress("Antigravity: создаю диалог…")
+            title = f"VideoHook: {(chat or {}).get('title') or name}"
+            cid = new_conversation(prompt, title)
+            _register(cid, (chat or {}).get("owner") or "oneshot")
+            if chat is not None:
+                chat["id"] = cid
         log.info("Antigravity task %s → %s", name, cid)
-        return wait_result(cid, result_path, expect, timeout, progress)
+        try:
+            return wait_result(cid, result_path, expect, timeout, progress, first_step=first)
+        finally:
+            if chat is None:
+                delete_conversation(cid)

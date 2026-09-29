@@ -99,8 +99,12 @@ def update_clip(clip_id: str, patch: Dict[str, Any], note: Optional[str] = None)
 
 def advance_stage(clip_id: str, stage: str, note: Optional[str] = None) -> Dict[str, Any]:
     clip = require_clip(clip_id)
-    if STAGE_ORDER.get(stage, 0) >= STAGE_ORDER.get(clip.get("stage", "found"), 0):
-        return update_clip(clip_id, {"stage": stage}, note)
+    prev = clip.get("stage", "found")   # запоминаем до update_clip: он меняет тот же объект
+    if STAGE_ORDER.get(stage, 0) >= STAGE_ORDER.get(prev, 0):
+        updated = update_clip(clip_id, {"stage": stage}, note)
+        if stage == "published" and prev != "published":
+            drop_chats(clip_id)   # 1 клип = 1 чат: после публикации чат в Antigravity больше не нужен
+        return updated
     return update_clip(clip_id, {}, note) if note else clip
 
 
@@ -109,6 +113,38 @@ def delete_clip(clip_id: str) -> None:
         data = _store.load()
         data["clips"] = [c for c in data.get("clips", []) if c["id"] != clip_id]
         _store.save()
+    drop_chats(clip_id)
+
+
+# ---------------------------------------------------------------------------
+# Чат клипа в Antigravity: все ИИ-задачи клипа идут в один диалог
+# ---------------------------------------------------------------------------
+def clip_chat(clip: Dict[str, Any]) -> Dict[str, Any]:
+    return {"id": clip.get("ai_chat_id", ""), "owner": clip["id"],
+            "title": f"{(clip.get('anime') or '')[:30]} — {(clip.get('title') or '')[:30]}"}
+
+
+def save_chat(clip_id: str, chat: Dict[str, Any]) -> None:
+    clip = get_clip(clip_id)
+    if clip and chat.get("id") and chat["id"] != clip.get("ai_chat_id"):
+        update_clip(clip_id, {"ai_chat_id": chat["id"]})
+
+
+def drop_chats(clip_id: str) -> None:
+    """Удаляет диалоги клипа в Antigravity в фоне (не задерживая публикацию)."""
+    import threading
+
+    from . import agbridge
+
+    def job():
+        try:
+            n = agbridge.delete_owner_chats(clip_id)
+            if n and get_clip(clip_id):
+                update_clip(clip_id, {"ai_chat_id": ""}, note=f"Antigravity: удалено чатов — {n}")
+        except Exception:  # noqa: BLE001 — удаление чата не должно ломать публикацию
+            pass
+
+    threading.Thread(target=job, daemon=True, name="ag-cleanup").start()
 
 
 def stage_counts() -> Dict[str, int]:

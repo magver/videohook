@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, Tuple
 
-from . import __version__, antigravity, gemini, library, moments, pipeline, publish
+from . import __version__, agbridge, antigravity, gemini, library, moments, pipeline, publish
 from .core import (WEB_DIR, WORK_DIR, ensure_dirs, ffmpeg_bin, public_settings, resolve_work, tasks,
                    update_settings)
 from .render import MUSIC_TRACKS, TEMPLATES, TRANSITIONS
@@ -62,8 +62,8 @@ def state() -> Dict[str, Any]:
     }
 
 
-def _task(kind: str, title: str, fn: Callable) -> Dict[str, Any]:
-    return {"task": tasks.submit(kind, title, fn).as_dict()}
+def _task(kind: str, title: str, fn: Callable, clip_id: str = "") -> Dict[str, Any]:
+    return {"task": tasks.submit(kind, title, fn, clip_id).as_dict()}
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +114,9 @@ def api_post(path: str, body: Dict[str, Any]) -> Any:
     if path == "/api/moments/reset":
         moments.reset_usage(body["moment_id"])
         return {"ok": True}
+    if path == "/api/moments/rate":
+        return _task("rate", "Шансы на успех", lambda tk: moments.rate_anime(body["anime_key"], tk,
+                                                                              bool(body.get("only_missing"))))
     if path == "/api/moments/maintain":
         return {"tasks": moments.maintain_all()}
 
@@ -125,9 +128,11 @@ def api_post(path: str, body: Dict[str, Any]) -> Any:
             clip = pipeline.create_from_url(body["url"].strip(), body.get("title", ""))
         run = body.get("run", "source")
         if run == "full":
-            t = tasks.submit("pipeline", f"Конвейер: {clip['title'][:40]}", lambda tk: pipeline.full_pipeline(clip["id"], tk))
+            t = tasks.submit("pipeline", f"Конвейер: {clip['title'][:40]}", lambda tk: pipeline.full_pipeline(clip["id"], tk),
+                             clip["id"])
         elif run == "source":
-            t = tasks.submit("source", f"Источник: {clip['title'][:40]}", lambda tk: pipeline.fetch_source(clip["id"], tk))
+            t = tasks.submit("source", f"Источник: {clip['title'][:40]}", lambda tk: pipeline.fetch_source(clip["id"], tk),
+                             clip["id"])
         else:
             t = None
         return {"clip": clip, "task": t.as_dict() if t else None}
@@ -152,20 +157,20 @@ def api_post(path: str, body: Dict[str, Any]) -> Any:
                        "subtitles", "transition", "accents"}
             return library.update_clip(cid, {k: v for k, v in body.items() if k in allowed})
         if action == "source":
-            return _task("source", f"Источник: {name}", lambda tk: pipeline.fetch_source(cid, tk, body.get("url", "")))
+            return _task("source", f"Источник: {name}", lambda tk: pipeline.fetch_source(cid, tk, body.get("url", "")), cid)
         if action == "analyze":
-            return _task("analyze", f"Gemini-анализ: {name}", lambda tk: pipeline.ai_analyze(cid, tk))
+            return _task("analyze", f"Gemini-анализ: {name}", lambda tk: pipeline.ai_analyze(cid, tk), cid)
         if action == "render":
-            return _task("render", f"Монтаж: {name}", lambda tk: pipeline.make_render(cid, dict(body), tk))
+            return _task("render", f"Монтаж: {name}", lambda tk: pipeline.make_render(cid, dict(body), tk), cid)
         if action == "antigravity":
             if sub == "check":
                 return antigravity.check_job(clip) or library.require_clip(cid)
-            return _task("antigravity", f"Antigravity: {name}", lambda tk: pipeline.send_to_antigravity(cid, tk))
+            return _task("antigravity", f"Antigravity: {name}", lambda tk: pipeline.send_to_antigravity(cid, tk), cid)
         if action == "skip_ag":
             antigravity.use_draft_as_final(cid)
             return pipeline.finalize(cid)
         if action == "full":
-            return _task("pipeline", f"Конвейер: {name}", lambda tk: pipeline.full_pipeline(cid, tk))
+            return _task("pipeline", f"Конвейер: {name}", lambda tk: pipeline.full_pipeline(cid, tk), cid)
         if action == "captions":
             if body.get("captions"):
                 return library.update_clip(cid, {"publish": {"captions": body["captions"]}})
@@ -175,9 +180,9 @@ def api_post(path: str, body: Dict[str, Any]) -> Any:
             if body.get("mode") == "assisted":
                 return publish.assisted(cid, platform)
             if platform == "youtube":
-                return _task("publish", f"YouTube: {name}", lambda tk: publish.youtube_upload(cid, tk))
+                return _task("publish", f"YouTube: {name}", lambda tk: publish.youtube_upload(cid, tk), cid)
             if platform == "tiktok":
-                return _task("publish", f"TikTok: {name}", lambda tk: publish.tiktok_upload(cid, tk))
+                return _task("publish", f"TikTok: {name}", lambda tk: publish.tiktok_upload(cid, tk), cid)
             return publish.assisted(cid, platform)
         if action == "mark_published":
             return publish.mark_published(cid, body["platform"], body.get("url", ""))
@@ -353,6 +358,8 @@ def start(port: int = PORT, open_browser: bool = True, block: bool = True) -> Tu
     watcher.start()
     # фоновая проверка запаса моментов по трендам
     threading.Timer(3.0, lambda: _safe(moments.maintain_all)).start()
+    # разовые диалоги Antigravity, которые не удалились сразу (Antigravity был закрыт и т.п.)
+    threading.Timer(20.0, lambda: _safe(agbridge.cleanup_stale)).start()
     srv, real_port = make_server(port)
     url = f"http://127.0.0.1:{real_port}"
     print(f"VideoHook {__version__}: {url}  (рабочая папка: {WORK_DIR})", flush=True)

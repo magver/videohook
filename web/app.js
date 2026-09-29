@@ -61,6 +61,8 @@ async function poll() {
     const h = st.health;
     $("#nb-settings").classList.toggle("on", !h.ffmpeg.ok || !(h.gemini.api || h.gemini.antigravity));
     renderTasks(st.tasks);
+    renderActivity(st.tasks);
+    updateClipTask();
     let changed = false;
     for (const t of st.tasks) {
       const prev = S.knownTasks[t.id];
@@ -73,11 +75,45 @@ async function poll() {
     if (changed) refreshData();
     else if (S.view === "home" || S.view === "agent") softRefresh();
   } catch (e) { /* сервер перезапускается */ }
-  setTimeout(poll, 2000);
+  const busy = (S.state?.tasks || []).some((t) => t.status === "running" || t.status === "queued");
+  setTimeout(poll, busy ? 1000 : 2500);
+}
+/* ---------------- прогресс ---------------- */
+const fmtDur = (s) => { s = Math.max(0, Math.round(s)); return s >= 60 ? `${Math.floor(s / 60)} мин ${s % 60} c` : `${s} c`; };
+const TPROG = {};   // история прогресса задач — для «осталось ~»
+function taskInfo(t) {
+  const now = Date.now() / 1000;
+  const el = t.started ? now - t.started : 0;
+  const h = (TPROG[t.id] = TPROG[t.id] || { p: t.progress, at: now, still: now });
+  if (t.progress !== h.p) { h.p = t.progress; h.still = now; }
+  const busy = now - h.still > 4;            // прогресс давно не менялся — показываем «идёт работа»
+  let eta = "";
+  if (t.status === "running" && t.progress > 0.05 && t.progress < 0.99 && el > 3) eta = "осталось ~" + fmtDur(el / t.progress - el);
+  return { el, eta, busy, pct: Math.round(t.progress * 100) };
+}
+function taskHtml(t, big) {
+  const i = taskInfo(t);
+  const queued = t.status === "queued";
+  return `<div class="act"><span class="spin"></span><b>${esc(t.title)}</b><span class="pct">${queued ? "в очереди" : i.pct + "%"}</span>
+    <div class="msg" title="${esc(t.message)}">${esc(t.message)}${i.el ? " · " + fmtDur(i.el) : ""}${i.eta ? " · " + i.eta : ""}</div>
+    <div class="bigbar ${i.busy || queued ? "busy" : ""}"><span style="width:${Math.max(2, i.pct)}%"></span></div></div>`;
+}
+function renderActivity(list) {
+  const act = list.filter((t) => t.status === "running" || t.status === "queued");
+  $("#activity").innerHTML = act.slice(0, 3).map((t) => taskHtml(t, true)).join("")
+    + (act.length > 3 ? `<div class="act"><span></span><small class="muted">и ещё задач: ${act.length - 3}</small></div>` : "");
+}
+function updateClipTask() {
+  const box = $("#clip-task");
+  if (!box || !S.clip) return;
+  const t = (S.state?.tasks || []).find((x) => x.clip_id === S.clip.id && (x.status === "running" || x.status === "queued"));
+  box.innerHTML = t ? `<div class="row between"><b><span class="spin"></span> ${esc(t.title)}</b><span class="pct">${Math.round(t.progress * 100)}%</span></div>
+    <div class="bigbar ${taskInfo(t).busy ? "busy" : ""}"><span style="width:${Math.max(2, Math.round(t.progress * 100))}%"></span></div>
+    <small class="muted">${esc(t.message)}${taskInfo(t).eta ? " · " + taskInfo(t).eta : ""}</small>` : "";
 }
 function renderTasks(list) {
   const now = Date.now() / 1000;
-  list = list.filter((t) => t.status === "running" || t.status === "queued" || (t.status === "error" && now - t.updated < 60) || now - t.updated < 6);
+  list = list.filter((t) => (t.status === "error" && now - t.updated < 60) || (t.status === "done" && now - t.updated < 8));
   $("#tasks").innerHTML = list.slice(0, 6).map((t) => `
     <div class="task ${t.status}"><b>${t.status === "running" ? '<span class="spin"></span> ' : ""}${esc(t.title)}</b>
     <div class="msg" title="${esc(t.error || t.message)}">${esc(t.error || t.message)}</div>
@@ -95,6 +131,7 @@ async function refreshData(soft = false) {
   if (S.view === "moments" && S.anime) S.catalog = null;
   const focused = document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
   if (focused && soft) return;
+  if (S.view === "settings") return;   // настройки не зависят от клипов — не стираем то, что вводится
   if (S.view === "studio" && focused) { renderClipList(); return; }
   render();
 }
@@ -225,7 +262,7 @@ async function renderBase() {
       <div class="card tight" style="cursor:pointer" data-k="${esc(a.key)}"><div class="row between"><b>${esc(a.name)}</b>
         <span class="chip ${a.fresh >= 3 ? "ok" : a.fresh ? "warn" : "err"}">${a.refilling ? "↻ " : ""}${a.fresh}/${a.total}</span></div>
         <small>${esc(a.studio)}${a.genres.length ? " · " + esc(a.genres.slice(0, 2).join(", ")) : ""}</small>
-        <div class="muted" style="font-size:12px;margin-top:6px">${a.moments.filter((m) => !m.used).slice(0, 2).map((m) => "• " + esc(m.title)).join("<br>") || "нет свежих — будет пополнено"}</div></div>`).join("")}</div>`;
+        <div class="muted" style="font-size:12px;margin-top:6px">${topFresh(a).slice(0, 2).map((m) => (m.score != null ? `<span class="score ${scoreCls(m.score)}">${m.score}%</span> ` : "• ") + esc(m.title)).join("<br>") || "нет свежих — будет пополнено"}</div></div>`).join("")}</div>`;
     $$("[data-k]", $("#blist")).forEach((el) => (el.onclick = () => { S.anime = el.dataset.k; viewMoments(); }));
   };
   $("#bsearch").oninput = debounce(load, 250);
@@ -243,19 +280,24 @@ async function renderAnime() {
     <div class="row" style="margin-bottom:14px"><button class="btn sm" onclick="S.anime=null;viewMoments()">← Назад</button>
       <h2 style="margin:0">${esc(a.name)}</h2><span class="chip">${esc(a.studio || "студия н/д")}</span>
       <span class="chip ${a.fresh >= 3 ? "ok" : "warn"}">свежих ${a.fresh} из ${a.total}</span>${a.refilling ? '<span class="chip"><span class="spin"></span> пополняется</span>' : ""}
-      <div style="flex:1"></div><button class="btn sm" id="refill">✨ Подобрать ещё (Gemini/YouTube)</button><button class="btn sm" id="addm">＋ Свой момент</button></div>
-    <div class="col">${a.moments.map((m) => `
+      <div style="flex:1"></div><button class="btn sm" id="rate">📈 Оценить шансы (Gemini)</button><button class="btn sm" id="refill">✨ Подобрать ещё (Gemini/YouTube)</button><button class="btn sm" id="addm">＋ Свой момент</button></div>
+    <div class="col">${sortMoments(a.moments).map((m) => `
       <div class="moment ${m.used ? "used" : ""}"><div>
-        <div class="row"><span class="h">${esc(m.title)}</span>${m.episode ? `<small>${esc(m.episode)}</small>` : ""}
+        <div class="row">${m.score != null ? `<span class="score ${scoreCls(m.score)}" title="${esc(m.score_why || "Шанс успеха по оценке Gemini")}">${m.score}%</span>` : ""}<span class="h">${esc(m.title)}</span>${m.episode ? `<small>${esc(m.episode)}</small>` : ""}
           <span class="chip ${m.mood}">${MOODS[m.mood] || m.mood}</span><span class="chip src-${m.source}">${SRC[m.source] || m.source}</span>
           ${m.views ? `<span class="chip">👁 ${fmtN(m.views)}</span>` : ""}${m.used ? `<span class="chip">использован ×${m.used_count}</span>` : ""}</div>
-        <div class="hook">«${esc(m.hook)}»</div>${m.why ? `<div class="why">${esc(m.why)}</div>` : ""}</div>
+        <div class="hook">«${esc(m.hook)}»</div>${m.score_why ? `<div class="why">📈 ${esc(m.score_why)}</div>` : m.why ? `<div class="why">${esc(m.why)}</div>` : ""}</div>
         <div class="row">${m.used ? `<button class="btn sm ghost" onclick="resetMoment('${m.id}')">вернуть</button>` : ""}
           <button class="btn sm" onclick="takeMoment('${esc(a.key)}','${m.id}','source')">В студию</button>
           <button class="btn sm primary" onclick="takeMoment('${esc(a.key)}','${m.id}','full')">⚡ Конвейер</button></div></div>`).join("") || '<div class="empty">Моменты подбираются…</div>'}</div>`;
   $("#refill").onclick = () => act(() => api("/api/moments/refill", { anime_key: a.key }), "Подбираю новые моменты…");
+  $("#rate").onclick = () => act(() => api("/api/moments/rate", { anime_key: a.key }), "Gemini оценивает шансы — прогресс вверху");
   $("#addm").onclick = () => addMomentModal(a.key);
 }
+const clipBusy = (id) => (S.state?.tasks || []).some((t) => t.clip_id === id && (t.status === "running" || t.status === "queued"));
+const scoreCls = (v) => (v >= 70 ? "hi" : v >= 45 ? "mid" : "lo");
+const sortMoments = (list) => list.slice().sort((x, y) => (x.used - y.used) || ((y.score ?? -1) - (x.score ?? -1)));
+const topFresh = (a) => sortMoments(a.moments.filter((m) => !m.used));
 async function takeMoment(key, id, run) {
   const r = await act(() => api("/api/clip/from_moment", { anime_key: key, moment_id: id, run }), run === "full" ? "Запущен полный конвейер" : "Ищу источник и лучший отрезок…");
   S.clips = await api("/api/clips");
@@ -340,7 +382,8 @@ function renderEditor() {
       <div class="row between"><div><h2 style="margin:0">${esc(c.title)}</h2><small>${esc(c.anime_name || c.anime)}${c.episode ? " · " + esc(c.episode) : ""}${c.source_views ? " · источник 👁 " + fmtN(c.source_views) : ""}</small></div>
         <div class="row"><button class="btn sm ghost danger" id="e-del">Удалить</button></div></div>
       <div class="steps">${order.map((_, i) => `<span class="${i <= si ? "on" : ""}"></span>`).join("")}</div>
-      ${!hasSrc ? `<div class="empty"><b>Источник ещё не скачан</b>Найдём лучший ролик по запросу «${esc(c.query || c.title)}» и выберем отрезок автоматически.<br><br>
+      <div id="clip-task" class="clip-task"></div>
+      ${!hasSrc && clipBusy(c.id) ? `<div class="empty"><b>Ищу источник и скачиваю…</b>Прогресс — в рамке выше. Можно переключаться между разделами, работа продолжится.</div>` : !hasSrc ? `<div class="empty"><b>Источник ещё не скачан</b>Найдём лучший ролик по запросу «${esc(c.query || c.title)}» и выберем отрезок автоматически.<br><br>
         <div class="row" style="justify-content:center"><input id="e-url" placeholder="или вставьте свою ссылку" style="max-width:360px"><button class="btn primary" id="e-src">Найти и скачать</button></div></div>` : `
       <div class="editor">
         <div>
@@ -380,7 +423,9 @@ function renderEditor() {
         </div>
       </div>`}
     </div>`;
+  updateClipTask();
   $("#e-del").onclick = async () => { if (confirm("Удалить клип из библиотеки?")) { await act(() => api(`/api/clip/${c.id}/delete`, {})); S.clip = null; refreshData(); } };
+  if (!hasSrc && !$("#e-src")) return;
   if (!hasSrc) {
     $("#e-src").onclick = () => act(() => api(`/api/clip/${c.id}/source`, { url: $("#e-url").value.trim() }), "Ищу и скачиваю…");
     return;
@@ -552,7 +597,7 @@ function viewSettings() {
   const cb = (k, label) => `<label class="chk"><input type="checkbox" data-k="${k}" ${s[k] ? "checked" : ""}> ${label}</label>`;
   $("#main").innerHTML = `
     <div class="head"><h1>Настройки</h1><span class="sub">рабочая папка: <code>${esc(S.state?.work_dir || "")}</code></span><div class="spacer"></div>
-      <button class="btn" id="hc">↻ Проверить подключения</button><button class="btn primary" id="save">Сохранить</button></div>
+      <button class="btn" id="hc">↻ Проверить подключения</button></div>
     <div class="grid g2">
       <div class="card stack"><h2>Канал</h2>
         ${f("brand_handle", "Подпись канала на ролике", "text", "показывается внизу каждого ролика, например @anime_hook")}
@@ -577,7 +622,8 @@ function viewSettings() {
       <div class="card stack"><h2>Монтаж</h2>
         <label class="f">Подложка по умолчанию<select data-k="default_template">${Object.entries(tpl).map(([k, n]) => `<option value="${k}" ${s.default_template === k ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
         <label class="f">Музыка по умолчанию<select data-k="default_music"><option value="none" ${s.default_music === "none" ? "selected" : ""}>Родной звук сцены (рекомендуется)</option><option value="auto" ${s.default_music === "auto" ? "selected" : ""}>Музыка по настроению сцены</option>${Object.entries(S.state?.music || {}).map(([k, n]) => `<option value="${k}" ${s.default_music === k ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
-        ${f("music_volume", "Громкость музыки (0–0.6)", "number")}${f("clip_max_seconds", "Максимальная длина ролика, c (сцена не обрезается короче нужного)", "number")}${cb("loop_friendly", "Мягкий луп по умолчанию (кроссфейд звука в конце)")}
+        ${f("music_volume", "Громкость музыки (0–0.6)", "number")}${f("clip_min_seconds", "Минимальная длина ролика, c (если исходник позволяет)", "number")}${f("clip_max_seconds", "Максимальная длина ролика, c", "number")}
+        ${cb("auto_rate_moments", "ИИ оценивает шанс успеха новых моментов")}${cb("loop_friendly", "Мягкий луп по умолчанию (кроссфейд звука в конце)")}
         <label class="f">Русские субтитры<select data-k="subtitles_mode"><option value="auto" ${s.subtitles_mode !== "off" ? "selected" : ""}>Добавлять, если есть реплики</option><option value="off" ${s.subtitles_mode === "off" ? "selected" : ""}>Не добавлять</option></select></label>
         ${cb("prefer_ru_dub", "Искать источник с русской озвучкой в первую очередь")}</div>
       <div class="card stack"><h2>YouTube Shorts</h2>
@@ -588,18 +634,46 @@ function viewSettings() {
         <label class="f">TikTok access token (Content Posting API, scope video.upload)<input data-k="tiktok_access_token" type="password" placeholder="${s.tiktok_access_token_set ? "сохранён " + esc(s.tiktok_access_token) : ""}"><small>Ролик уходит во «Входящие» TikTok — подпись вставляете в приложении (она копируется автоматически).</small></label>
         ${cb("auto_publish", "Автоматически загружать готовые ролики через подключённые API")}
         <small class="muted">Instagram Reels публикуется ассистентом: подпись в буфер, файл выделен, открыт instagram.com.</small></div>
-    </div>`;
+    </div>
+    <div class="savebar"><small class="muted" id="save-state">Изменения сохраняются автоматически</small>
+      <button class="btn primary" id="save">Сохранить</button></div>`;
   $("#hc").onclick = async () => { await act(() => api("/api/health"), "Проверено"); await poll1(); viewSettings(); };
-  $("#save").onclick = async () => {
+  const readInput = (i) => {
+    if (i.type === "checkbox") return i.checked;
+    if (i.type === "number") return +i.value;
+    return i.value.trim();
+  };
+  const collectSettings = () => {
     const patch = {};
-    $$("[data-k]").forEach((i) => {
-      const k = i.dataset.k;
-      if (i.type === "checkbox") patch[k] = i.checked;
-      else if (i.type === "password") { if (i.value.trim()) patch[k] = i.value.trim(); }
-      else if (i.type === "number") patch[k] = +i.value;
-      else patch[k] = i.value.trim();
+    $$("[data-k]", $("#main")).forEach((i) => {
+      if (i.type === "password" && !i.value.trim()) return;   // пустое поле ключа — не затираем сохранённый
+      patch[i.dataset.k] = readInput(i);
     });
-    await act(() => api("/api/settings", patch), "Настройки сохранены");
+    return patch;
+  };
+  const pending = {};
+  const flush = debounce(async () => {
+    const patch = { ...pending };
+    Object.keys(pending).forEach((k) => delete pending[k]);
+    if (!Object.keys(patch).length) return;
+    $("#save-state").textContent = "Сохраняю…";
+    try {
+      S.state.settings = await api("/api/settings", patch);
+      $("#save-state").textContent = "✓ Сохранено";
+    } catch (e) { $("#save-state").textContent = "Не сохранено: " + e.message; toast(e.message, "err"); }
+  }, 600);
+  $$("[data-k]", $("#main")).forEach((i) => {
+    const ev = i.type === "checkbox" || i.tagName === "SELECT" ? "change" : "input";
+    i.addEventListener(ev, () => {
+      if (i.type === "password" && !i.value.trim()) return;
+      pending[i.dataset.k] = readInput(i);
+      $("#save-state").textContent = "Есть изменения…";
+      flush();
+    });
+  });
+  $("#save").onclick = async () => {
+    S.state.settings = await act(() => api("/api/settings", collectSettings()), "Настройки сохранены");
+    $("#save-state").textContent = "✓ Сохранено";
     await api("/api/health");
     await poll1(); viewSettings();
   };

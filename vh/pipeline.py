@@ -9,9 +9,9 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from . import antigravity, discovery, gemini, library, moments, publish
-from .core import RENDERS_DIR, get_settings, rel_to_work, resolve_work, slugify, tasks
-from .render import TRANSITIONS, contact_sheet, extract_audio, extract_thumbnail, render
+from . import antigravity, discovery, gemini, library, moments, publish, scenes
+from .core import RENDERS_DIR, SubTask, get_settings, rel_to_work, resolve_work, slugify, tasks
+from .render import extract_audio, extract_thumbnail, render, storyboards
 
 log = logging.getLogger("videohook.pipeline")
 
@@ -149,7 +149,7 @@ def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any
     offset = dl["offset"]
     local_dur = dl["duration"]
 
-    t(0.75, "Ищу лучший момент (звук, динамика, пересмотры)…")
+    t(0.72, "Ищу лучший момент (звук, динамика, пересмотры)…")
     heat_local = []
     for h in heat:
         s0, e0 = h["start"] - offset, h["end"] - offset
@@ -158,17 +158,21 @@ def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any
     local = discovery.local_windows(dl["path"], TARGET_SECONDS, 3)
     suggestions = discovery.merge_suggestions(heat_local, local, top_k=5)
     best = suggestions[0] if suggestions else {"start": 0.0, "end": min(local_dur, TARGET_SECONDS)}
-    # границы — к естественным точкам: склейка/пауза перед завязкой, пауза после последней фразы
-    max_len = float(get_settings().get("clip_max_seconds", 58))
+    # сначала максимальная длина вокруг кульминации (завязка важнее хвоста), потом границы — к паузам и склейкам
+    s = get_settings()
+    max_len = float(s.get("clip_max_seconds", 58))
+    min_len = float(s.get("clip_min_seconds", 35))
     try:
-        best = {**best, **discovery.refine_bounds(dl["path"], best["start"], best["end"], max_len=max_len)}
+        ws, we = scenes.expand_window(best["start"], best["end"], local_dur, min_len, max_len - 4)
+        best = {**best, **discovery.refine_bounds(dl["path"], ws, we, min_len=min(min_len, local_dur),
+                                                  max_len=max_len)}
         if suggestions:
             suggestions[0] = {**suggestions[0], "start": best["start"], "end": best["end"]}
     except Exception as exc:  # noqa: BLE001
         log.warning("refine_bounds: %s", exc)
     accents: List[float] = []
     try:
-        accents = discovery.audio_peaks(dl["path"], best["start"], best["end"])
+        accents = discovery.audio_peaks(dl["path"], best["start"], best["end"], n=6, min_gap=3.0)
     except Exception as exc:  # noqa: BLE001
         log.warning("audio_peaks: %s", exc)
 
@@ -183,10 +187,16 @@ def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any
                          for x in got["items"] if x["end"] - offset > 0]
             subs_kind = "youtube-" + (subs.get("kind", "") if got["lang"] == "ru" else "orig")
             if subtitles and got["lang"] != "ru":
-                # автоперевод YouTube недоступен — переводим оригинал через ИИ, без ИИ субтитры не показываем
-                subtitles = (gemini.translate_subtitles(subtitles, clip.get("anime_name") or "", got["lang"])
-                             if gemini.available() else [])
-                subs_kind = "gemini-translate"
+                # автоперевод YouTube недоступен — переводим оригинал через ИИ; без перевода субтитры не показываем
+                foreign, subtitles, subs_kind = subtitles, [], ""
+                if gemini.available():
+                    chat = library.clip_chat(clip)
+                    try:
+                        subtitles = gemini.translate_subtitles(foreign, clip.get("anime_name") or "", got["lang"],
+                                                               chat=chat)
+                        subs_kind = "gemini-translate"
+                    finally:
+                        library.save_chat(clip_id, chat)
     except Exception as exc:  # noqa: BLE001
         log.warning("subtitles: %s", exc)
 
@@ -230,42 +240,55 @@ def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any
 
 
 def ai_analyze(clip_id: str, task=None) -> Dict[str, Any]:
-    """Gemini (через Antigravity или API) смотрит исходник и предлагает отрезки, хук, реплики, идеи монтажа."""
+    """Gemini (через Antigravity или API) размечает весь исходник на смысловые биты; сцена собирается кодом:
+    максимальная длина, сокращаются только пустые куски, речь не режется."""
     clip = library.require_clip(clip_id)
-    if task:
-        task.update(0.85, "Gemini смотрит видео…")
+    t = task.update if task else (lambda *a, **k: None)
+    t(0.82, "Готовлю раскадровки и звук для Gemini…")
     src = resolve_work(clip["source_file"])
     ctx = f"{clip.get('anime_name')}, сцена «{clip.get('title')}»"
-    storyboard = audio = None
+    sheets: List[str] = []
+    audio = None
     try:
-        sb = RENDERS_DIR / f"{clip_id}_storyboard.jpg"
-        storyboard = contact_sheet(str(src), str(sb))
+        sheets = storyboards(str(src), str(RENDERS_DIR / f"{clip_id}_sb"))
     except Exception as exc:  # noqa: BLE001
-        log.warning("storyboard: %s", exc)
+        log.warning("storyboards: %s", exc)
     try:
         audio = extract_audio(str(src), str(RENDERS_DIR / f"{clip_id}_audio.wav"))
     except Exception as exc:  # noqa: BLE001
         log.warning("audio: %s", exc)
     s = get_settings()
-    data = gemini.analyze_video(src, ctx, TARGET_SECONDS, mood=clip.get("mood", ""), hook=clip.get("hook", ""),
-                                hints=clip.get("suggestions", []), storyboard=storyboard, audio=audio,
-                                max_seconds=int(s.get("clip_max_seconds", 58)), ru_audio=bool(clip.get("ru_dub")),
-                                progress=(lambda m: task.update(None, m)) if task else None)
+    chat = library.clip_chat(clip)
+    t(0.85, "Gemini смотрит и слушает исходник…")
+    try:
+        data = gemini.analyze_video(src, ctx, TARGET_SECONDS, mood=clip.get("mood", ""), hook=clip.get("hook", ""),
+                                    hints=clip.get("suggestions", []), storyboard=sheets, audio=audio,
+                                    max_seconds=int(s.get("clip_max_seconds", 58)),
+                                    min_seconds=int(s.get("clip_min_seconds", 35)),
+                                    duration=float(clip.get("source_duration") or 0),
+                                    ru_audio=bool(clip.get("ru_dub")), chat=chat,
+                                    progress=(lambda m: task.update(None, m)) if task else None)
+    finally:
+        library.save_chat(clip_id, chat)
     dur = float(clip.get("source_duration") or 0) or 1e9
+    subs = data.get("subtitles") or clip.get("subtitles") or []
+    parts = scenes.protect_speech(data.get("parts") or [], subs, dur) if data.get("parts") else []
     suggestions = discovery.merge_suggestions(data.get("segments", []), clip.get("suggestions", []), top_k=5)
-    patch: Dict[str, Any] = {"suggestions": suggestions,
-                             "ai": {k: data.get(k) for k in ("hook", "caption", "mood", "story", "dialogue_heavy")}}
-    if data.get("segments"):
-        best = data["segments"][0]
-        patch["segment"] = {"start": max(0.0, best["start"]), "end": min(dur, best["end"])}
-        patch["parts"] = [[max(0.0, a), min(dur, b)] for a, b in data.get("parts") or [] if a < dur]
+    patch: Dict[str, Any] = {"suggestions": suggestions, "beats": data.get("beats", []),
+                             "plan_removed": data.get("plan_removed", []),
+                             "ai": {k: data.get(k) for k in ("hook", "caption", "mood", "story", "dialogue_heavy",
+                                                               "virality", "virality_why")}}
+    if parts:
+        patch["segment"] = {"start": parts[0][0], "end": parts[-1][1]}
+        patch["parts"] = parts if len(parts) > 1 else []
     elif suggestions:
         patch["segment"] = {"start": suggestions[0]["start"], "end": suggestions[0]["end"]}
+    if data.get("virality") is not None and clip.get("moment_id"):
+        moments.set_score(clip.get("anime_key", ""), clip["moment_id"], data["virality"], data.get("virality_why", ""),
+                          source="video")
     if data.get("accents"):
         patch["accents"] = data["accents"]
     patch["slowmo"] = data.get("slowmo")
-    if data.get("transition") in TRANSITIONS:
-        patch["transition"] = data["transition"]
     if data.get("subtitles"):
         patch["subtitles"] = data["subtitles"]
         patch["subtitles_source"] = "gemini"
@@ -416,12 +439,12 @@ def full_pipeline(clip_id: str, task=None) -> Dict[str, Any]:
     clip = library.require_clip(clip_id)
     if not clip.get("source_file"):
         t(0.02, "1/3 Источник…")
-        fetch_source(clip_id, None)
-    t(0.45, "2/3 Монтаж 9:16…")
-    make_render(clip_id)
+        fetch_source(clip_id, SubTask(task, 0.02, 0.6, "1/3 "))
+    t(0.6, "2/3 Монтаж 9:16…")
+    make_render(clip_id, task=SubTask(task, 0.6, 0.88, "2/3 "))
     if s.get("use_antigravity"):
-        t(0.8, "3/3 Отправка в Antigravity…")
-        send_to_antigravity(clip_id)
+        t(0.88, "3/3 Отправка в Antigravity…")
+        send_to_antigravity(clip_id, SubTask(task, 0.88, 0.99, "3/3 "))
         t(1.0, "В Antigravity — результат подхватится автоматически")
     else:
         antigravity.use_draft_as_final(clip_id)
@@ -447,6 +470,7 @@ def pick_fresh_moments(count: int, anime_keys: Optional[List[str]] = None) -> Li
     while len(picked) < count and rounds < 3:
         for k in keys:
             fresh = [m for m in moments.list_moments(k, include_used=False) if m["id"] not in {p["id"] for p in picked}]
+            fresh.sort(key=lambda m: -(m.get("score") if m.get("score") is not None else 50))  # лучшие шансы — первыми
             if fresh:
                 picked.append(fresh[0])
             if len(picked) >= count:
@@ -466,7 +490,9 @@ def autopilot(count: int = 3, anime_keys: Optional[List[str]] = None, task=None)
         t(base, f"[{i + 1}/{len(chosen)}] {m['title']}")
         try:
             clip = create_from_moment(m["anime_key"], m["id"])
-            full_pipeline(clip["id"])
+            if task:
+                task.clip_id = clip["id"]
+            full_pipeline(clip["id"], SubTask(task, base, base + 1 / len(chosen), f"[{i + 1}/{len(chosen)}] "))
             done.append(clip["id"])
         except Exception as exc:  # noqa: BLE001
             log.warning("autopilot %s: %s", m["title"], exc)

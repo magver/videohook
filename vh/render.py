@@ -144,6 +144,26 @@ def extract_audio(path: str, out_path: str) -> str:
     return out_path
 
 
+def storyboards(path: str, out_dir: str, every: float = 1.0, cols: int = 5, rows: int = 4) -> List[str]:
+    """Раскадровки всего файла: кадр каждые `every` c, на каждом — таймкод. Для точной разметки ИИ."""
+    dur = probe(path)["duration"] or 1
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.glob("sb_*.jpg"):
+        old.unlink()
+    font = next(iter(FONTS_DIR.glob("*.ttf")), None)
+    per = cols * rows
+    sheets = max(1, int(dur / every / per + 0.999))
+    tc = ""
+    if font:
+        ff = font.as_posix().replace(":", "\\:")
+        tc = (f",drawtext=fontfile='{ff}':text='%{{pts\\:hms}}':x=6:y=6:fontsize=26:fontcolor=white:"
+              f"box=1:boxcolor=black@0.7:boxborderw=4")
+    run_ffmpeg(["-i", str(path), "-vf", f"fps=1/{every},scale=384:-2{tc},tile={cols}x{rows}:padding=4:margin=4",
+                "-q:v", "4", "-frames:v", str(sheets), str(out / "sb_%02d.jpg")])
+    return [str(x) for x in sorted(out.glob("sb_*.jpg"))]
+
+
 def contact_sheet(path: str, out_path: str, cols: int = 4, rows: int = 4) -> str:
     """Раскадровка с таймкодами — отдаётся агенту Antigravity для визуального анализа."""
     dur = probe(path)["duration"] or 1
@@ -282,22 +302,25 @@ DEFAULT_EFFECTS = {
     "flash": True,           # короткая вспышка на кульминации
     "slowmo": True,          # замедление кульминации (если задан момент)
     "impact_sfx": True,      # низкий «удар» на акцентах
-    "whoosh_sfx": True,      # «вжух» на переходах между частями
+    "whoosh_sfx": False,     # «вжух» на переходах между частями (внутри одной сцены обычно лишний)
+    "slow_push": True,       # медленный наезд камеры на протяжении ролика — кадр «живёт»
+    "fade_out": True,        # мягкое затухание в конце вместо обрыва
     "punchy_audio": True,    # компрессия и бас оригинальной дорожки
     "loudnorm": True,        # громкость −14 LUFS
 }
 
 # переход между частями ролика по настроению сцены (фильтр xfade)
 MOOD_TRANSITIONS = {
-    "epic": "fadewhite", "dark": "fadeblack", "twist": "zoomin", "emotional": "dissolve",
-    "romantic": "dissolve", "funny": "slideleft",
+    # внутри одной сцены нужен незаметный переход: мягкий кроссфейд картинки и более длинный — звука
+    "epic": "fade", "dark": "fade", "twist": "fade", "emotional": "dissolve", "romantic": "dissolve", "funny": "fade",
 }
 TRANSITIONS = {
-    "auto": "Авто по настроению", "cut": "Жёсткая склейка", "fadewhite": "Вспышка", "fadeblack": "Через чёрный",
+    "auto": "Авто (плавный)", "fade": "Плавный кроссфейд", "cut": "Жёсткая склейка", "fadewhite": "Вспышка", "fadeblack": "Через чёрный",
     "dissolve": "Растворение", "zoomin": "Зум", "slideleft": "Сдвиг", "smoothup": "Плавный вверх",
     "circleopen": "Круг", "pixelize": "Пикселизация",
 }
-XFADE_DUR = 0.35
+XFADE_DUR = 0.5        # переход картинки
+AFADE_DUR = 0.5        # переход звука (равен картинке, чтобы шкала времени совпадала)
 
 
 def subtitle_chunks(sub: Dict[str, Any], max_chars: int = 42) -> List[Tuple[float, float, str]]:
@@ -462,7 +485,7 @@ def render(source: str, params: Dict[str, Any], out_path: Optional[str] = None,
         if xd:
             fc.append(f"{vprev}[vs{i}]xfade=transition={transition}:duration={xd}:offset={acc - xd:.3f}[vx{i}]")
             if has_audio:
-                fc.append(f"{aprev}[as{i}]acrossfade=d={xd}[ax{i}]")
+                fc.append(f"{aprev}[as{i}]acrossfade=d={AFADE_DUR}:c1=qsin:c2=qsin[ax{i}]")
             acc += tl.seg_durs[i] - xd
         else:
             if has_audio:
@@ -510,6 +533,8 @@ def render(source: str, params: Dict[str, Any], out_path: Optional[str] = None,
         cur = "[sp]"
     # 3. эффекты: панч-зум на старте и на ударных моментах, вспышки на кульминации
     zoom_terms = []
+    if effects.get("slow_push"):
+        zoom_terms.append(f"0.06*min(it/{max(1.0, duration):.2f},1)")
     if effects.get("zoom_punch"):
         zoom_terms.append("if(lt(it,0.7),0.14-0.2*it,0)")
     if effects.get("accent_zoom") and accents:
@@ -524,6 +549,9 @@ def render(source: str, params: Dict[str, Any], out_path: Optional[str] = None,
             en = "+".join(f"between(t,{t:.2f},{t + 0.07:.2f})" for t in flashes)
             fc.append(f"{cur}eq=brightness=0.28:contrast=1.1:enable='{en}'[fl]")
             cur = "[fl]"
+    if effects.get("fade_out") and not params.get("loop_friendly"):
+        fc.append(f"{cur}fade=t=out:st={max(0.0, duration - 0.5):.2f}:d=0.5[fo]")
+        cur = "[fo]"
     # 4. надписи
     ass_text = build_ass({**params, "template": template, "subtitles": subtitles}, duration, box)
     (work / "overlay.ass").write_text(ass_text, encoding="utf-8")
@@ -572,7 +600,7 @@ def render(source: str, params: Dict[str, Any], out_path: Optional[str] = None,
     if params.get("loop_friendly"):
         a_final += f",afade=t=out:st={max(0.0, duration - 0.15):.2f}:d=0.15"
     else:
-        a_final += f",afade=t=out:st={max(0.0, duration - 0.6):.2f}:d=0.6"
+        a_final += f",afade=t=out:st={max(0.0, duration - 0.8):.2f}:d=0.8"
     if effects.get("loudnorm"):
         a_final += ",loudnorm=I=-14:TP=-1.5:LRA=11"
     fc.append(f"{acur}{a_final},aresample=44100[aout]")

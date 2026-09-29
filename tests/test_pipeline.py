@@ -141,7 +141,7 @@ def test_foreign_subtitles_are_translated(sample_video, monkeypatch):
         "items": [{"start": 9, "end": 11, "text": "こんにちは"}], "lang": "ja"})
     monkeypatch.setattr(gemini, "available", lambda: True)
     monkeypatch.setattr(gemini, "analyze_video", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("skip")))
-    monkeypatch.setattr(gemini, "translate_subtitles", lambda items, ctx, lang: [{**items[0], "text": "Привет"}])
+    monkeypatch.setattr(gemini, "translate_subtitles", lambda items, ctx, lang, **k: [{**items[0], "text": "Привет"}])
     clip = pipeline.fetch_source(clip["id"])
     assert clip["subtitles"] == [{"start": 9, "end": 11, "text": "Привет"}]
     assert clip["subtitles_source"] == "gemini-translate"
