@@ -59,6 +59,11 @@ main { overflow: auto; padding: 22px 28px 60px; flex: 1; min-height: 0; }
 .clip-task .row b { font-size: 14px; }
 .score { font-weight: 800; border-radius: 8px; padding: 2px 8px; font-size: 12px; }
 .score.hi { background: #16a34a; color: #fff; } .score.mid { background: #ca8a04; color: #111; } .score.lo { background: #3f3f46; color: #e4e4e7; }
+.fb { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fb .on { outline: 2px solid var(--accent); }
+.guide { width: 100%; min-height: 420px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.5; }
+.ex { display: grid; gap: 6px; }
+.ex ul { margin: 4px 0 0 18px; padding: 0; } .ex li { margin: 2px 0; }
 .savebar { position: sticky; bottom: 0; z-index: 5; display: flex; gap: 10px; align-items: center; justify-content: flex-end;
   padding: 12px 16px; margin-top: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
 .head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }

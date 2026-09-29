@@ -103,6 +103,10 @@ def build_brief(job: Dict[str, Any], job_dir: Path) -> str:
 ## Творческое направление ({mood})
 {MOOD_DIRECTION.get(mood, MOOD_DIRECTION['epic'])}
 
+## Стиль канала
+Прочитай `STYLE.md` в папке задачи — это правила, выученные на примерах и оценках автора канала.
+Раздел «Мои правила» — обязателен; остальные правила применяй, если они не противоречат требованиям ниже.
+
 ## Сюжет сцены
 {job.get('story') or 'Определи сам: завязка → кульминация → развязка.'}
 Отрезок в `source_cut.mp4`: {job['segment_in_cut']['start']:.1f}–{job['segment_in_cut']['end']:.1f} c{parts_txt}.
@@ -233,6 +237,9 @@ def create_job(clip_id: str) -> Dict[str, Any]:
     }
     (job_dir / "job.json").write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
     (inp / "subtitles.srt").write_text(to_srt(job["subtitles"]), encoding="utf-8")
+    from .style import read_guide
+
+    (job_dir / "STYLE.md").write_text(read_guide(), encoding="utf-8")
     brief = build_brief(job, job_dir)
     (job_dir / "BRIEF.md").write_text(brief, encoding="utf-8")
 

@@ -72,6 +72,7 @@ async function poll() {
       }
       S.knownTasks[t.id] = t.status;
     }
+    if (changed && S.view === "learn" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) viewLearn();
     if (changed) refreshData();
     else if (S.view === "home" || S.view === "agent") softRefresh();
   } catch (e) { /* сервер перезапускается */ }
@@ -131,13 +132,13 @@ async function refreshData(soft = false) {
   if (S.view === "moments" && S.anime) S.catalog = null;
   const focused = document.activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
   if (focused && soft) return;
-  if (S.view === "settings") return;   // настройки не зависят от клипов — не стираем то, что вводится
+  if (S.view === "settings" || S.view === "learn") return;   // не стираем то, что вводится
   if (S.view === "studio" && focused) { renderClipList(); return; }
   render();
 }
 
 function render() {
-  const v = { home: viewHome, moments: viewMoments, studio: viewStudio, agent: viewAgent, publish: viewPublish, settings: viewSettings }[S.view];
+  const v = { home: viewHome, moments: viewMoments, studio: viewStudio, agent: viewAgent, publish: viewPublish, settings: viewSettings, learn: viewLearn }[S.view];
   v();
 }
 
@@ -415,6 +416,9 @@ function renderEditor() {
             <label class="chk"><input type="checkbox" id="e-loop" ${(p.loop_friendly ?? st.settings?.loop_friendly ?? false) ? "checked" : ""}> Мягкий луп</label>
             <label class="chk"><input type="checkbox" id="e-bar" ${(p.progress_bar ?? true) ? "checked" : ""}> Прогресс-бар</label></div>
           <small class="muted">Внизу всегда кредит: «${esc(c.credit)}» — ролик оформляется как фан-обзор, а не перезалив.</small>
+          ${c.render?.file ? `<div class="card tight"><h3 style="margin:0 0 6px">Как вам ролик? <small class="muted">— оценки учат стиль канала</small></h3>
+            <div class="fb"><button class="btn sm ${c.feedback?.rating > 0 ? "on" : ""}" data-fb="1">👍 Нравится</button><button class="btn sm ${c.feedback?.rating < 0 ? "on" : ""}" data-fb="-1">👎 Не то</button>
+            <input id="fb-c" placeholder="что именно: «обрезан финал», «мало динамики», «хук огонь»…" value="${esc(c.feedback?.comment || "")}" style="flex:1;min-width:220px"></div></div>` : ""}
           <div class="row"><button class="btn primary" id="e-render">🎬 Смонтировать 9:16</button>
             <button class="btn" id="e-ag" ${c.render?.file ? "" : "disabled"}>◈ Доработать в Antigravity</button>
             <button class="btn ghost" id="e-skip" ${c.render?.file ? "" : "disabled"}>Сразу в публикацию</button></div>
@@ -473,6 +477,10 @@ function renderEditor() {
   });
   $("#e-render").onclick = () => act(() => api(`/api/clip/${c.id}/render`, collect()), "Монтаж запущен");
   $("#e-ag").onclick = () => sendAG(c.id);
+  $$("[data-fb]").forEach((b) => (b.onclick = async () => {
+    const fb = await act(() => api(`/api/clip/${c.id}/feedback`, { rating: +b.dataset.fb, comment: $("#fb-c").value }), "Оценка учтена — стиль канала учится");
+    c.feedback = fb; $$("[data-fb]").forEach((x) => x.classList.toggle("on", x === b));
+  }));
   $("#e-skip").onclick = async () => { await act(() => api(`/api/clip/${c.id}/skip_ag`, {}), "Отправлено в публикацию"); refreshData(); };
 }
 async function sendAG(id) { await act(() => api(`/api/clip/${id}/antigravity`, {}), "Готовлю задачу для Antigravity…"); }
@@ -589,6 +597,50 @@ async function saveCaps(c, el, tab) {
 }
 
 /* ---------------- Настройки ---------------- */
+/* ---------------- Обучение стилю ---------------- */
+async function viewLearn() {
+  $("#main").innerHTML = '<div class="empty"><span class="spin"></span></div>';
+  const d = await api("/api/style");
+  const st = d.stats;
+  $("#main").innerHTML = `
+    <div class="head"><h1>Обучение</h1><span class="sub">память стиля канала: примеры ${st.examples} · 👍 ${st.likes} · 👎 ${st.dislikes}</span></div>
+    <div class="grid g2">
+      <div class="stack">
+        <div class="card stack"><h2>Добавить пример, который нравится</h2>
+          <label class="f">Ссылка на ролик (YouTube, Shorts, TikTok, Instagram)<input id="ex-url" placeholder="https://…"></label>
+          <label class="f">Что в нём нравится<textarea id="ex-note" rows="3" placeholder="например: динамичный монтаж под удары, хук с вопросом, субтитры по 2–3 слова, финал на реакции героя"></textarea></label>
+          <div class="row"><button class="btn primary" id="ex-add">✎ Изучить пример</button><small class="muted">Скачаю, измерю темп и склейки, Gemini разберёт по пунктам и обновит правила. Прогресс — вверху.</small></div></div>
+        <div class="card stack"><h2>Изученные примеры</h2>
+          ${d.examples.map((e) => `<div class="ex card tight"><div class="row between"><b>${esc(e.title || e.url)}</b><button class="btn sm ghost danger" data-exdel="${e.id}">Удалить</button></div>
+            <small class="muted">${e.metrics ? `${e.metrics.duration} c · склеек ${e.metrics.cuts_per_min}/мин · план ${e.metrics.avg_shot} c` : ""}${e.note ? " · «" + esc(e.note) + "»" : ""}</small>
+            ${e.summary ? `<div>${esc(e.summary)}</div>` : ""}
+            ${(e.lessons || []).length ? `<ul>${e.lessons.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}</div>`).join("") || '<div class="empty">Пока нет примеров. Добавьте 3–5 роликов, которые нравятся, — правила станут точнее.</div>'}
+        </div>
+        <div class="card stack"><h2>Оценки ваших роликов</h2>
+          ${d.feedback.slice(0, 20).map((f) => `<div class="row"><span>${f.rating > 0 ? "👍" : "👎"}</span><b>${esc(f.title || "")}</b><small class="muted">${esc(f.anime || "")} · ${f.duration || "?"} c</small>${f.comment ? `<small>«${esc(f.comment)}»</small>` : ""}</div>`).join("") || '<small class="muted">Оценивайте ролики в студии кнопками 👍/👎 — каждые 5 оценок правила пересобираются сами.</small>'}
+        </div>
+      </div>
+      <div class="card stack"><div class="row between"><h2 style="margin:0">Правила стиля</h2><button class="btn sm" id="g-rebuild">↻ Пересобрать из примеров и оценок</button></div>
+        <small class="muted">Эти правила получает ИИ во всех задачах: подбор и оценка моментов, анализ видео, описания, монтаж в Antigravity.
+          Раздел «Мои правила» пишете только вы — ИИ его не меняет. Файл: <code>${esc(st.guide_path)}</code></small>
+        <textarea class="guide" id="g-text">${esc(d.guide)}</textarea>
+        <div class="row"><small class="muted" id="g-state">Изменения сохраняются автоматически</small></div></div>
+    </div>`;
+  $("#ex-add").onclick = async () => {
+    const url = $("#ex-url").value.trim();
+    if (!url) return toast("Вставьте ссылку на пример", "err");
+    await act(() => api("/api/style/example", { url, note: $("#ex-note").value.trim() }), "Изучаю пример — прогресс вверху");
+    $("#ex-url").value = ""; $("#ex-note").value = "";
+  };
+  $$("[data-exdel]").forEach((b) => (b.onclick = async () => { await act(() => api("/api/style/example/delete", { id: b.dataset.exdel })); viewLearn(); }));
+  $("#g-rebuild").onclick = () => act(() => api("/api/style/rebuild", {}), "Gemini пересобирает правила — прогресс вверху");
+  const saveGuide = debounce(async () => {
+    try { await api("/api/style/guide", { guide: $("#g-text").value }); $("#g-state").textContent = "✓ Сохранено"; }
+    catch (e) { $("#g-state").textContent = "Не сохранено: " + e.message; }
+  }, 800);
+  $("#g-text").addEventListener("input", () => { $("#g-state").textContent = "Есть изменения…"; saveGuide(); });
+}
+
 function viewSettings() {
   const s = S.state?.settings || {};
   const h = S.state?.health || {};

@@ -200,7 +200,7 @@ def suggest_moments(anime_name: str, known_titles: List[str], count: int = 5,
 {{"title": "короткое название сцены на русском", "episode": "сезон/серия или арка", "query": "запрос для YouTube на русском",
 "query_en": "YouTube search query in English: <anime title> <characters> <action> scene", "hook": "цепляющий заголовок до 45 символов без эмодзи",
 "mood": "{MOODS}", "why": "почему это залетит (1 фраза)", "virality": "шанс успеха шортса 0–100, строго"}}
-Верни JSON-объект {{"moments": [...]}}."""
+Верни JSON-объект {{"moments": [...]}}.{_style()}"""
     data = parse_json(generate(prompt, temperature=0.9, task_name="moments"))
     items = data.get("moments", []) if isinstance(data, dict) else data
     return [m for m in items or [] if isinstance(m, dict) and m.get("title")]
@@ -276,7 +276,7 @@ def analyze_video(path: str | Path, context: str, target_seconds: int = 35, mood
  "peak": 0.0, "story": "…", "accents": [0.0, …], "slowmo": {{"t": 0.0, "dur": 1.2}} или null,
  "hook": "…", "caption": "…", "subtitles": [{{"start": 0.0, "end": 0.0, "text": "…"}}], "dialogue_heavy": false,
  "mood": "…", "virality": 0, "virality_why": "…", "edit_ideas": ["…"]}}
-Все времена — секунды от начала этого файла."""
+Все времена — секунды от начала этого файла.{_style()}"""
     local = [str(path)] + [str(x) for x in sheets] + ([audio] if audio else [])
     data = parse_json(generate(prompt, local_paths=local, temperature=0.3, task_name="analyze", progress=progress,
                                chat=chat))
@@ -357,10 +357,87 @@ def rate_moments(anime_name: str, genres: List[str], items: List[Dict[str, Any]]
 6. риск спойлера для текущей аудитории и потенциал комментариев/споров.
 Будь строгим: 80+ — только культовые сцены на пике популярности; 50–70 — хорошая сцена; ниже 40 — слабая или заезженная.
 Сцены: {json.dumps(rows, ensure_ascii=False)}
-Верни JSON: {{"scores": [{{"id": "…", "score": 0, "why": "одна фраза: главный фактор"}}]}}"""
+Верни JSON: {{"scores": [{{"id": "…", "score": 0, "why": "одна фраза: главный фактор"}}]}}{_style()}"""
     data = parse_json(generate(prompt, temperature=0.3, task_name="rate", progress=progress))
     lst = data.get("scores", []) if isinstance(data, dict) else data
     return {str(x["id"]): x for x in lst or [] if isinstance(x, dict) and x.get("id") is not None}
+
+
+def _style() -> str:
+    from . import style
+
+    try:
+        return style.prompt_block()
+    except Exception:  # noqa: BLE001 — стиль не должен ломать основную задачу
+        return ""
+
+
+def study_example(path: str, sheets: List[str], audio: Optional[str], note: str, metrics: Dict[str, Any],
+                  title: str = "", progress=None) -> Dict[str, Any]:
+    """Разбор ролика-образца: чем он цепляет — в виде конкретных правил для своего монтажа."""
+    prompt = f"""Ты — монтажёр и аналитик вирусных вертикальных роликов. Автор канала аниме-шортсов прислал ПРИМЕР,
+который ему нравится, чтобы ты выучил его стиль.
+Название: «{title or 'н/д'}». Что нравится автору: «{note or 'не указал — определи сам'}».
+Объективные метрики (посчитаны программой): длительность {metrics.get('duration')} c, склеек {metrics.get('cuts')}
+({metrics.get('cuts_per_min')} в минуту, средний план {metrics.get('avg_shot')} c), вертикальный: {metrics.get('vertical')},
+динамика громкости (пик/медиана): {metrics.get('audio_dynamics')}.
+Материалы: раскадровки с таймкодом на каждом кадре и WAV-дорожка — изучи их ЦЕЛИКОМ, от начала до конца.
+
+Разбери по пунктам, опираясь на увиденное (с секундами):
+1. Хук: что происходит в первые 2 c, какой текст на экране, почему не хочется листать.
+2. Драматургия: как устроены завязка, кульминация, финал; есть ли тизер кульминации в начале; как сделан конец (луп, стоп-кадр, реакция).
+3. Длина и темп: почему именно такая длина; где темп ускоряется и замедляется; сколько длятся планы в спокойных и активных местах.
+4. Монтаж: как склеены куски (кроссфейд, прямая склейка по действию, J/L-cut звука), что вырезано, а что оставлено ради смысла.
+5. Эффекты: зумы, наезды, тряска, замедления, вспышки, цветокоррекция — где именно и насколько сильно.
+6. Звук: родной звук или музыка, как слышны голоса, звуковые акценты, тишина.
+7. Текст на экране: хук, субтитры (размер, позиция, по сколько слов, выделение слов), подпись канала.
+Затем сформулируй ПРАВИЛА, которые можно применить к любому аниме-ролику канала: в повелительном наклонении, с числами
+(«первые 1.5 c — кульминация как тизер, затем завязка», «зум 1.0→1.1 на каждом ударе»). Без общих слов вроде «делай интересно».
+Верни JSON: {{"summary": "2–3 предложения: чем цепляет пример", "lessons": ["правило", …] (6–15),
+"avoid": ["чего пример избегает и что не надо делать", …] (0–6), "tags": ["краткие метки стиля"]}}"""
+    data = parse_json(generate(prompt, local_paths=[path, *sheets, *([audio] if audio else [])], temperature=0.3,
+                               task_name="study", progress=progress))
+    if not isinstance(data, dict):
+        raise RuntimeError("Gemini вернул неожиданный формат разбора примера")
+    data["lessons"] = [str(x).strip() for x in data.get("lessons") or [] if str(x).strip()][:15]
+    data["avoid"] = [str(x).strip() for x in data.get("avoid") or [] if str(x).strip()][:6]
+    return data
+
+
+def build_style_guide(user_rules: str, current_ai: str, examples: List[Dict[str, Any]],
+                      feedback: List[Dict[str, Any]], progress=None) -> str:
+    """Сводит все примеры и оценки в раздел правил стиля (markdown)."""
+    ex_rows = [{"title": e.get("title"), "note": e.get("note"), "metrics": e.get("metrics"), "summary": e.get("summary"),
+                "lessons": e.get("lessons"), "avoid": e.get("avoid")} for e in examples]
+    fb_rows = [{k: f.get(k) for k in ("rating", "comment", "anime", "title", "mood", "hook", "duration", "parts",
+                                      "transition", "effects", "music", "subtitles", "removed")} for f in feedback]
+    prompt = f"""Ты ведёшь «память стиля» канала вертикальных аниме-роликов. По ней работают подбор моментов, анализ
+видео, монтаж и описания. Обнови раздел выученных правил.
+
+Правила автора (ГЛАВНЫЕ, не противоречь им и не повторяй их):
+{user_rules or '(нет)'}
+
+Текущие выученные правила (автор мог их поправить вручную — такие правки сохраняй):
+{current_ai or '(пока нет)'}
+
+Примеры, которые нравятся автору (разборы): {json.dumps(ex_rows, ensure_ascii=False)}
+
+Оценки автора своих роликов (rating 1 — нравится, -1 — нет; параметры ролика и комментарий):
+{json.dumps(fb_rows, ensure_ascii=False)}
+
+Как работать:
+- Ищи ЗАКОНОМЕРНОСТИ: что общего у понравившихся примеров и роликов с 👍, чем отличаются ролики с 👎.
+  Комментарии автора — самый сильный сигнал. Одиночное наблюдение помечай «(предварительно)».
+- Правила — конкретные и проверяемые, с числами (длина, темп, секунды, сила эффектов), в повелительном наклонении.
+- Противоречия решай в пользу более свежих данных и комментариев автора; устаревшее удаляй.
+- Не больше 45 правил. Группы (заголовки ###): Выбор момента; Длина и структура; Монтаж и темп; Переходы и эффекты;
+  Звук; Текст на экране и субтитры; Хуки и описания; Чего избегать.
+Верни JSON: {{"guide": "markdown с разделами ### и пунктами -", "changes": "коротко: что изменилось"}}"""
+    data = parse_json(generate(prompt, temperature=0.3, task_name="style", progress=progress))
+    guide = data.get("guide") if isinstance(data, dict) else None
+    if not guide or not str(guide).strip():
+        raise RuntimeError("Gemini не вернул правила стиля")
+    return str(guide).strip()
 
 
 def translate_subtitles(items: List[Dict[str, Any]], context: str, lang: str = "",
@@ -399,7 +476,7 @@ def write_captions(clip: Dict[str, Any], settings: Dict[str, Any],
 Правила: язык — русский; первая строка — интрига/вопрос, вызывающий комментарии; не спойлерить развязку, если настроение twist;
 обязательно указать название аниме и кредит правообладателю (© студия) — ролик сделан как фан-обзор;
 без кликбейта про «полную серию» и без ссылок на пиратские сайты; хэштеги — по тайтлу, персонажам и жанру.
-НЕ добавляй ссылки, подпись канала и призывы подписаться — они добавляются автоматически из настроек канала.
+НЕ добавляй ссылки, подпись канала и призывы подписаться — они добавляются автоматически из настроек канала.{_style()}
 Верни JSON:
 {{"youtube": {{"title": "до 90 символов, в конце #shorts", "description": "до 600 символов", "tags": ["до 12 тегов без #"]}},
  "tiktok": {{"caption": "до 300 символов, 4–6 хэштегов в конце"}},

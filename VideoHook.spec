@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_all
 datas = [("assets", "assets"), ("web", "web"), ("data/moments.json", "data")]
 binaries = []
 hiddenimports = ["clr", "vh", "vh.server", "vh.pipeline", "vh.moments", "vh.discovery", "vh.gemini",
-                 "vh.render", "vh.antigravity", "vh.agbridge", "vh.desktop", "vh.publish", "vh.library", "vh.core"]
+                 "vh.render", "vh.antigravity", "vh.agbridge", "vh.desktop", "vh.scenes", "vh.style", "vh.publish", "vh.library", "vh.core"]
 for pkg in ["imageio_ffmpeg", "yt_dlp", "yt_dlp_ejs", "certifi", "cv2", "requests", "psutil", "webview", "clr_loader", "pythonnet"]:
     d, b, h = collect_all(pkg)
     datas += d

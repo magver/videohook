@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, Tuple
 
-from . import __version__, agbridge, antigravity, gemini, library, moments, pipeline, publish
+from . import __version__, agbridge, antigravity, gemini, library, moments, pipeline, publish, style
 from .core import (WEB_DIR, WORK_DIR, ensure_dirs, ffmpeg_bin, public_settings, resolve_work, tasks,
                    update_settings)
 from .render import MUSIC_TRACKS, TEMPLATES, TRANSITIONS
@@ -93,6 +93,9 @@ def api_get(path: str, q: Dict[str, str], handler: "Handler") -> Any:
         return library.require_clip(path.split("/")[3])
     if path == "/api/settings":
         return public_settings()
+    if path == "/api/style":
+        return {"guide": style.read_guide(), "examples": style.list_examples(), "feedback": style.list_feedback(),
+                "stats": style.stats()}
     if path == "/api/youtube/connect":
         url = publish.youtube_auth_url(f"http://127.0.0.1:{handler.server.server_address[1]}/oauth/youtube")
         handler.redirect(url)
@@ -117,6 +120,17 @@ def api_post(path: str, body: Dict[str, Any]) -> Any:
     if path == "/api/moments/rate":
         return _task("rate", "Шансы на успех", lambda tk: moments.rate_anime(body["anime_key"], tk,
                                                                               bool(body.get("only_missing"))))
+    # --- обучение стилю
+    if path == "/api/style/example":
+        url = body["url"].strip()
+        return _task("study", "Обучение: разбираю пример", lambda tk: style.study_example(url, body.get("note", ""), tk))
+    if path == "/api/style/example/delete":
+        style.delete_example(body["id"])
+        return {"ok": True}
+    if path == "/api/style/guide":
+        return {"guide": style.write_guide(body["guide"])}
+    if path == "/api/style/rebuild":
+        return _task("style", "Обучение: обновляю правила стиля", lambda tk: style.rebuild_guide(tk))
     if path == "/api/moments/maintain":
         return {"tasks": moments.maintain_all()}
 
@@ -184,6 +198,8 @@ def api_post(path: str, body: Dict[str, Any]) -> Any:
             if platform == "tiktok":
                 return _task("publish", f"TikTok: {name}", lambda tk: publish.tiktok_upload(cid, tk), cid)
             return publish.assisted(cid, platform)
+        if action == "feedback":
+            return style.add_feedback(clip, int(body.get("rating", 1)), body.get("comment", ""))
         if action == "mark_published":
             return publish.mark_published(cid, body["platform"], body.get("url", ""))
         if action == "open":
