@@ -4,9 +4,9 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [("assets", "assets"), ("web", "web"), ("data/moments.json", "data")]
 binaries = []
-hiddenimports = ["vh", "vh.server", "vh.pipeline", "vh.moments", "vh.discovery", "vh.gemini",
-                 "vh.render", "vh.antigravity", "vh.agbridge", "vh.publish", "vh.library", "vh.core"]
-for pkg in ["imageio_ffmpeg", "yt_dlp", "yt_dlp_ejs", "certifi", "cv2", "requests", "psutil"]:
+hiddenimports = ["clr", "vh", "vh.server", "vh.pipeline", "vh.moments", "vh.discovery", "vh.gemini",
+                 "vh.render", "vh.antigravity", "vh.agbridge", "vh.desktop", "vh.publish", "vh.library", "vh.core"]
+for pkg in ["imageio_ffmpeg", "yt_dlp", "yt_dlp_ejs", "certifi", "cv2", "requests", "psutil", "webview", "clr_loader", "pythonnet"]:
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
@@ -17,4 +17,5 @@ a = Analysis(["main.py"], pathex=["."], binaries=binaries, datas=datas, hiddenim
              noarchive=False)
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="VideoHook", debug=False, strip=False, upx=True,
-          console=True, disable_windowed_traceback=False)
+          console=False, disable_windowed_traceback=False,
+          icon="assets/icon.ico")

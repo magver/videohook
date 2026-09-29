@@ -1,7 +1,8 @@
-"""VideoHook — запуск локального приложения (веб-интерфейс в браузере).
+"""VideoHook — запуск настольного приложения.
 
-    python main.py               # открыть в браузере
-    python main.py --no-browser  # только сервер
+    python main.py               # окно программы
+    python main.py --browser     # интерфейс в браузере
+    python main.py --no-browser  # только сервер (для отладки и тестов)
     python main.py --port 9000
 """
 
@@ -24,7 +25,7 @@ if os.name == "nt":
 
 
 REQUIRED_MODULES = {"yt_dlp": "yt-dlp", "requests": "requests", "imageio_ffmpeg": "imageio-ffmpeg",
-                    "psutil": "psutil"}
+                    "psutil": "psutil", "webview": "pywebview"}
 
 
 def ensure_dependencies() -> None:
@@ -44,19 +45,40 @@ def ensure_dependencies() -> None:
               f"{sys.executable} -m pip install -r requirements.txt", flush=True)
 
 
+def setup_logging(debug: bool) -> None:
+    """Лог в файл рабочей папки (у оконной сборки нет консоли) и в консоль, если она есть."""
+    from logging.handlers import RotatingFileHandler
+
+    from vh.core import DATA_DIR
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    handlers: list = [RotatingFileHandler(DATA_DIR / "videohook.log", maxBytes=2_000_000, backupCount=2,
+                                          encoding="utf-8")]
+    if sys.stderr:
+        handlers.append(logging.StreamHandler())
+    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO, handlers=handlers,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="VideoHook — вирусные аниме-шортсы 9:16")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--browser", action="store_true", help="открыть интерфейс в браузере вместо окна")
+    parser.add_argument("--no-browser", action="store_true", help="только сервер, без окна")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     ensure_dependencies()
-    from vh.server import start
+    setup_logging(args.debug)
 
     try:
-        start(port=args.port, open_browser=not args.no_browser)
+        if args.browser or args.no_browser:
+            from vh.server import start
+
+            start(port=args.port, open_browser=args.browser)
+        else:
+            from vh.desktop import run
+
+            run(args.port)
     except KeyboardInterrupt:
         sys.exit(0)
 

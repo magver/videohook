@@ -15,9 +15,13 @@
 
 ```bash
 pip install -r requirements.txt
-python main.py            # откроется http://127.0.0.1:8765
+python main.py            # окно программы
+python main.py --browser  # интерфейс в браузере
 ```
-На Windows — двойной клик по `run_app.bat`. Сборка `.exe`: `pyinstaller VideoHook.spec`.
+VideoHook — настольная программа: интерфейс открывается в собственном окне (Edge WebView2, есть в Windows 10/11),
+локальный сервер работает внутри того же процесса. Закрытие окна завершает программу; если идут задачи, программа спросит.
+На Windows — двойной клик по `run_app.bat` или по собранному `VideoHook.exe` (`pyinstaller VideoHook.spec` → `dist/`).
+Лог работы — `workspace/data/videohook.log`.
 Все рабочие данные (исходники, рендеры, задачи агента, настройки, токены) — в папке `workspace/` рядом с программой.
 
 ## Интерфейс
@@ -120,6 +124,7 @@ vh/antigravity.py  папка задачи, запуск агента, отсл�
 vh/publish.py      описания, YouTube/TikTok API, ассистент
 vh/pipeline.py     шаги конвейера и автопилот
 vh/server.py       REST API + статика (только 127.0.0.1)
+vh/desktop.py      окно программы (pywebview / WebView2)
 web/               интерфейс (HTML/CSS/JS без сборки)
 data/moments.json  сид базы моментов
 tests/             pytest: офлайн-конвейер целиком, API, база
