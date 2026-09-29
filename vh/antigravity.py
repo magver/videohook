@@ -361,7 +361,9 @@ def import_result(clip_id: str, result: Dict[str, Any]) -> Dict[str, Any]:
                "edits": result.get("edits", []), "notes": result.get("notes", "")},
     }
     if result.get("captions"):
-        patch["publish"] = {"captions": result["captions"]}
+        from .publish import apply_channel
+
+        patch["publish"] = {"captions": apply_channel(dict(result["captions"]), get_settings())}
     if result.get("pinned_comment"):
         patch["pinned_comment"] = result["pinned_comment"]
     library.update_clip(clip_id, patch, note="Antigravity: результат импортирован")

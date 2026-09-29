@@ -554,7 +554,17 @@ function viewSettings() {
     <div class="head"><h1>Настройки</h1><span class="sub">рабочая папка: <code>${esc(S.state?.work_dir || "")}</code></span><div class="spacer"></div>
       <button class="btn" id="hc">↻ Проверить подключения</button><button class="btn primary" id="save">Сохранить</button></div>
     <div class="grid g2">
-      <div class="card stack"><h2>Канал</h2>${f("brand_handle", "Подпись канала на ролике")}${f("telegram", "Telegram (ссылка в описании, необязательно)")}</div>
+      <div class="card stack"><h2>Канал</h2>
+        ${f("brand_handle", "Подпись канала на ролике", "text", "показывается внизу каждого ролика, например @anime_hook")}
+        ${f("channel_name", "Название канала", "text", "используется в описаниях и подсказках ИИ")}
+        <label class="f">Подпись в описаниях<textarea data-k="caption_signature" rows="3" placeholder="Например: Подписывайся — каждый день лучшие моменты аниме 🔥">${esc(s.caption_signature || "")}</textarea><small>Добавляется в конец описания каждого ролика на всех площадках.</small></label>
+        ${f("channel_hashtags", "Постоянные хэштеги канала", "text", "через пробел: anime_hook аниме_моменты — добавятся к каждому описанию и тегам YouTube")}
+        <h3 style="margin:6px 0 0">Ресурсы канала</h3>
+        <div class="grid g2">${f("telegram", "Telegram", "text", "https://t.me/…")}${f("link_youtube", "YouTube", "text", "https://youtube.com/@…")}
+          ${f("link_tiktok", "TikTok", "text", "https://tiktok.com/@…")}${f("link_instagram", "Instagram", "text", "https://instagram.com/…")}
+          ${f("link_vk", "VK", "text", "https://vk.com/…")}${f("link_donate", "Поддержка (Boosty, донаты)", "text", "https://boosty.to/…")}</div>
+        ${cb("links_in_short_captions", "Добавлять ссылки и в TikTok/Instagram (там они не кликабельны)")}
+        <small class="muted">Ссылки и подпись вставляются в описания автоматически — вручную править каждый ролик не нужно.</small></div>
       <div class="card stack"><h2>Google AI Pro — Gemini</h2>${cb("ai_via_antigravity", "ИИ-задачи через Antigravity (приоритет: мощнее модель, больше лимитов)")}
         <label class="f">API-ключ Gemini<input data-k="gemini_api_key" type="password" placeholder="${s.gemini_api_key_set ? "сохранён " + esc(s.gemini_api_key) : "AIza…"}"><small>Ключ бесплатно: <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a>. Запасной канал, если Antigravity недоступен.</small></label>
         ${f("gemini_model", "Модель Gemini", "text", "например gemini-flash-latest или gemini-pro-latest")}

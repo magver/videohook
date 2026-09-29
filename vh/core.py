@@ -114,8 +114,18 @@ class JsonStore:
 # Настройки
 # ---------------------------------------------------------------------------
 DEFAULT_SETTINGS: Dict[str, Any] = {
+    # Канал: подпись на ролике и ресурсы, которые автоматически добавляются в описания всех роликов
     "brand_handle": "@anime_hook",          # подпись канала на ролике
-    "telegram": "",                          # опциональная ссылка на Telegram в описании
+    "channel_name": "",                      # название канала (для описаний и ИИ)
+    "caption_signature": "",                 # постоянный текст в конце каждого описания
+    "channel_hashtags": "",                  # постоянные хэштеги канала, через пробел или запятую
+    "telegram": "",                          # ссылки на ресурсы канала
+    "link_youtube": "",
+    "link_tiktok": "",
+    "link_instagram": "",
+    "link_vk": "",
+    "link_donate": "",                       # Boosty / DonationAlerts / другое
+    "links_in_short_captions": True,         # добавлять ссылки и в TikTok/Instagram (там они не кликабельны)
     "language": "ru",
     # Google AI Pro: ИИ-задачи идут в Antigravity (приоритет), Gemini API — запасной канал
     "ai_via_antigravity": True,              # подбор моментов, анализ видео, описания — через Antigravity

@@ -63,8 +63,47 @@ def hashtags_for(clip: Dict[str, Any], n: int = 10) -> List[str]:
     return res[:n]
 
 
+LINK_LABELS = (("telegram", "Telegram"), ("link_youtube", "YouTube"), ("link_tiktok", "TikTok"),
+               ("link_instagram", "Instagram"), ("link_vk", "VK"), ("link_donate", "Поддержать канал"))
+
+
+def channel_hashtags(s: Dict[str, Any]) -> List[str]:
+    return [t for t in (_tag(x) for x in re.split(r"[\s,;]+", s.get("channel_hashtags") or "")) if t]
+
+
+def channel_block(s: Dict[str, Any], platform: str) -> str:
+    """Подпись канала и ссылки на ресурсы — одинаковые во всех описаниях, настраиваются один раз."""
+    parts = []
+    if s.get("caption_signature"):
+        parts.append(s["caption_signature"].strip())
+    if platform == "youtube" or s.get("links_in_short_captions", True):
+        links = [f"{label}: {s[k].strip()}" for k, label in LINK_LABELS if (s.get(k) or "").strip()]
+        if links:
+            parts.append("\n".join(links))
+    return "\n".join(parts)
+
+
+def apply_channel(caps: Dict[str, Any], s: Dict[str, Any]) -> Dict[str, Any]:
+    """Добавляет блок канала и постоянные хэштеги в описания (без дублей, если они уже есть)."""
+    tags = channel_hashtags(s)
+    targets = (("youtube", "description"), ("tiktok", "caption"), ("instagram", "caption"))
+    for platform, field in targets:
+        box = caps.setdefault(platform, {})
+        text = (box.get(field) or "").rstrip()
+        block = channel_block(s, platform)
+        new_lines = [ln for ln in block.split("\n") if ln.strip() and ln.strip() not in text]
+        if new_lines:
+            text = f"{text}\n\n" + "\n".join(new_lines) if text else "\n".join(new_lines)
+        missing = [f"#{t}" for t in tags if f"#{t}".lower() not in text.lower()]
+        if missing:
+            text += ("\n" if text else "") + " ".join(missing)
+        box[field] = text
+    yt = caps["youtube"]
+    yt["tags"] = list(dict.fromkeys([*(yt.get("tags") or []), *tags]))[:15]
+    return caps
+
+
 def captions_offline(clip: Dict[str, Any]) -> Dict[str, Any]:
-    s = get_settings()
     anime = clip.get("anime_name") or clip.get("anime") or "аниме"
     hook = clip.get("hook") or clip.get("title") or anime
     credit = clip.get("credit") or f"Аниме: {anime}"
@@ -76,7 +115,6 @@ def captions_offline(clip: Dict[str, Any]) -> Dict[str, Any]:
         "romantic": "Лучшая пара этого аниме? 💞",
         "funny": "Отметь друга, который так же делает 😂",
     }.get(clip.get("mood", "epic"), "Что думаете? 👇")
-    tg = f"\nБольше разборов: {s['telegram']}" if s.get("telegram") else ""
     tags = hashtags_for(clip, 12)
     yt_title = f"{hook} | {anime}"
     if len(yt_title) > 88:
@@ -85,12 +123,12 @@ def captions_offline(clip: Dict[str, Any]) -> Dict[str, Any]:
         "youtube": {
             "title": f"{yt_title} #shorts"[: LIMITS["youtube_title"]],
             "description": f"{question}\n\n🎬 {clip.get('title') or ''} {('— ' + clip['episode']) if clip.get('episode') else ''}\n"
-                           f"{credit}. Фрагмент использован в формате обзора/комментария.{tg}\n\n"
+                           f"{credit}. Фрагмент использован в формате обзора/комментария.\n\n"
                            + " ".join(f"#{t}" for t in tags[:8]),
             "tags": tags[:12],
         },
-        "tiktok": {"caption": f"{hook} — {anime}. {question}\n{credit}{tg}\n" + " ".join(f"#{t}" for t in tags[:6])},
-        "instagram": {"caption": f"{hook}\n\n{question}\n\n🎬 {anime}\n{credit}{tg}\n.\n" + " ".join(f"#{t}" for t in tags[:12])},
+        "tiktok": {"caption": f"{hook} — {anime}. {question}\n{credit}\n" + " ".join(f"#{t}" for t in tags[:6])},
+        "instagram": {"caption": f"{hook}\n\n{question}\n\n🎬 {anime}\n{credit}\n.\n" + " ".join(f"#{t}" for t in tags[:12])},
         "pinned_comment": question,
         "source": "template",
     }
@@ -111,6 +149,7 @@ def prepare_captions(clip_id: str, use_ai: bool = True) -> Dict[str, Any]:
             caps["warning"] = f"Gemini: {str(exc)[:120]}"
     else:
         caps = captions_offline(clip)
+    apply_channel(caps, get_settings())
     # нормализация лимитов
     yt = caps.setdefault("youtube", {})
     yt["title"] = (yt.get("title") or "")[: LIMITS["youtube_title"]]

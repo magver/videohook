@@ -97,3 +97,19 @@ def test_tiktok_chunking_rules():
     ch = publish.tiktok_chunks(size)
     assert ch[0][0] == 0 and ch[-1][1] == size - 1
     assert all(b - a + 1 >= 5 * 1024 * 1024 for a, b in ch)
+
+
+def test_channel_signature_and_links_added_once():
+    s = {"caption_signature": "Подписывайся на канал", "telegram": "https://t.me/hook", "link_donate": "https://boosty.to/hook",
+         "channel_hashtags": "anime_hook, аниме_моменты", "links_in_short_captions": False}
+    caps = {"youtube": {"title": "t", "description": "Описание", "tags": ["anime"]},
+            "tiktok": {"caption": "Тикток #anime_hook"}, "instagram": {"caption": "Инста"}}
+    publish.apply_channel(caps, s)
+    yt = caps["youtube"]["description"]
+    assert "Подписывайся на канал" in yt and "Telegram: https://t.me/hook" in yt and "Поддержать канал: https://boosty.to/hook" in yt
+    assert "#anime_hook" in yt and "#аниме_моменты" in yt
+    assert "t.me" not in caps["tiktok"]["caption"] and "Подписывайся на канал" in caps["tiktok"]["caption"]
+    assert caps["tiktok"]["caption"].count("#anime_hook") == 1
+    assert "anime_hook" in caps["youtube"]["tags"]
+    publish.apply_channel(caps, s)   # повторный вызов не дублирует
+    assert caps["youtube"]["description"].count("Telegram:") == 1
