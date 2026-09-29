@@ -69,6 +69,12 @@ def build_brief(job: Dict[str, Any], job_dir: Path) -> str:
     lines_txt = "\n".join(f"  - {kl['t']:.1f} c: «{kl['text']}»" for kl in job.get("key_lines", [])) or "  - (нет данных)"
     ideas = "\n".join(f"  - {i}" for i in job.get("edit_ideas", [])) or "  - на твоё усмотрение по направлению ниже"
     music_files = ", ".join(p.name for p in (job_dir / "input" / "music").glob("*.mp3")) or "нет"
+    parts = job.get("parts_in_cut") or []
+    parts_txt = ("; части для склейки: " + ", ".join(f"{a:.1f}–{b:.1f} c" for a, b in parts)) if len(parts) > 1 else ""
+    accents_txt = ", ".join(f"{a:.1f} c" for a in job.get("accents_in_cut") or []) or "найди сам по звуку и действию"
+    sm = job.get("slowmo_in_cut")
+    slowmo_txt = (f"замедление 0.5x на {sm['t'] - sm['dur'] / 2:.1f}–{sm['t'] + sm['dur'] / 2:.1f} c (кульминация)"
+                  if sm else "замедление — только если усиливает кульминацию, не в диалоге")
     return f"""# Задача VideoHook: вирусный вертикальный ролик — {job['anime_name']}
 
 Ты — монтажёр вирусных аниме-шортсов. Работай полностью автономно в папке:
@@ -79,7 +85,8 @@ def build_brief(job: Dict[str, Any], job_dir: Path) -> str:
 - `source_cut.mp4` — чистый фрагмент сцены без надписей ({job['source_duration']:.1f} c).
 - `draft_9x16.mp4` — черновик VideoHook: раскладка «{job['template']}», тексты, музыка. Это ориентир, улучши его.
 - `storyboard.jpg` — раскадровка 4×4 по времени.
-- `music/`: {music_files}. Рекомендуемый трек: `{job.get('music') or 'на твой выбор'}`.
+- `music/`: {music_files}. {('Выбранный трек: `' + job['music'] + '` — тихо, под родным звуком.') if job.get('music') else 'Музыка НЕ нужна: основа — родной звук сцены (голоса, удары, саундтрек аниме).'}
+- `subtitles.srt` — русские субтитры по времени `source_cut.mp4` ({len(job.get('subtitles') or [])} реплик).
 - `fonts/Rubik-ExtraBold.ttf` — фирменный шрифт с кириллицей.
 - `job.json` — все параметры в машиночитаемом виде.
 
@@ -96,17 +103,31 @@ def build_brief(job: Dict[str, Any], job_dir: Path) -> str:
 ## Творческое направление ({mood})
 {MOOD_DIRECTION.get(mood, MOOD_DIRECTION['epic'])}
 
+## Сюжет сцены
+{job.get('story') or 'Определи сам: завязка → кульминация → развязка.'}
+Отрезок в `source_cut.mp4`: {job['segment_in_cut']['start']:.1f}–{job['segment_in_cut']['end']:.1f} c{parts_txt}.
+
 ## Обязательная структура ролика
-1. **0–1.5 c — хук**: самый сильный кадр сцены первым (можно вынести кульминацию в начало как тизер), крупный план, панч-зум, текст-хук сверху, звуковой акцент.
-2. **1.5 c – конец — развитие**: убрать паузы > 0.4 c, ритм под музыку, 1–2 смены крупности (зум-ин/зум-аут) на ключевых репликах, динамические субтитры по 2–4 слова (белый, чёрная обводка, ударное слово — #FACC15).
-3. **Последние 1–2 c — петля**: финальный кадр должен плавно переходить в первый (бесшовный луп: совпадающий кадр, кроссфейд звука 0.15 c).
-4. Длительность: 15–{s.get('clip_max_seconds', 45)} c. Кадр 1080×1920, 30 или 60 fps.
+1. **Сцена целиком**: зритель должен понять, что происходит, без контекста. Сохрани завязку, кульминацию и развязку/реакцию.
+   Не начинай посреди фразы и НЕ обрывай финал: последняя реплика и реакция на кульминацию должны прозвучать полностью.
+   Сокращать можно только затянутую середину (паузы > 0.6 c, повторы, долгие проходы) — склейки на границах фраз.
+2. **0–1.5 c — хук**: сильный первый кадр, панч-зум, текст-хук сверху. Можно дать 1–2 c кульминации как тизер,
+   но затем сцена идёт с завязки.
+3. **Эффекты**: на ударных моментах ({accents_txt}) — панч-зум 1.0→1.12, короткая вспышка, низкий «удар» по звуку;
+   {slowmo_txt}; 1–2 смены крупности на ключевых репликах; лёгкая тряска кадра на самых сильных ударах.
+4. **Переходы** между частями: {job.get('transition') or 'по настроению'} + короткий «вжух» (0.3–0.5 c) в звуке; внутри сцены — прямые склейки.
+5. **Звук**: основа — РОДНОЙ звук сцены (голоса, удары, оригинальный саундтрек). Не заглушай его музыкой.
+   Компрессия и лёгкий подъём низа для «плотности», звуковые акценты — только поверх родного звука.
+6. **Субтитры**: русские, из `input/subtitles.srt` (проверь тайминги по речи), по 1–2 строки, белый, чёрная обводка,
+   ударное слово — #FACC15; держи их выше нижних 320 px.
+7. **Финал**: дай кадру «подышать» 0.3–0.6 c после последней реплики; затухание звука 0.3–0.6 c.
+8. Длительность: сколько нужно для законченной сцены, но не более {s.get('clip_max_seconds', 58)} c. Кадр 1080×1920, 30 или 60 fps.
 
 ## Авторский слой и авторские права (обязательно)
 - Ролик — трансформирующий фан-обзор, а не перезалив: сохраняй авторскую подложку — заголовок-контекст, подпись/комментарий, прогресс-бар, подпись канала `{s.get('brand_handle')}`.
 - Внизу мелко всегда: «{job['credit']}».
 - Используй только короткий фрагмент (не более {s.get('clip_max_seconds', 45)} c), не вырезай и не маскируй чужие логотипы/водяные знаки, не зеркаль и не ускоряй ради обхода Content ID.
-- Музыку бери только из `input/music/` (лицензированная библиотека VideoHook) или оставь оригинальный звук.
+- Дополнительную музыку бери только из `input/music/` (лицензированная библиотека VideoHook).
 
 ## Технические требования
 - H.264 High, yuv420p, CRF ≤ 20, AAC 44.1 кГц 192 кбит/с, громкость −14 LUFS (true peak ≤ −1.5 dB), `-movflags +faststart`.
@@ -129,6 +150,13 @@ def build_brief(job: Dict[str, Any], job_dir: Path) -> str:
 """
 
 
+def to_srt(items: List[Dict[str, Any]]) -> str:
+    def ts(t: float) -> str:
+        t = max(0.0, t)
+        return f"{int(t // 3600):02d}:{int(t % 3600 // 60):02d}:{int(t % 60):02d},{int(round(t % 1 * 1000)) % 1000:03d}"
+    return "\n".join(f"{i}\n{ts(x['start'])} --> {ts(x['end'])}\n{x['text']}\n" for i, x in enumerate(items, 1))
+
+
 def create_job(clip_id: str) -> Dict[str, Any]:
     """Готовит папку задачи из клипа (нужны source_file и render.file)."""
     from .core import ffmpeg_bin, probe, resolve_work
@@ -148,7 +176,7 @@ def create_job(clip_id: str) -> Dict[str, Any]:
     src = resolve_work(clip["source_file"])
     seg = clip.get("segment") or {"start": 0, "end": min(probe(src)["duration"], s.get("clip_max_seconds", 45))}
     cut = inp / "source_cut.mp4"
-    margin = 2.0
+    margin = 6.0   # запас до и после, чтобы агент видел контекст и мог сдвинуть границы к фразам
     st = max(0.0, float(seg["start"]) - margin)
     run_ffmpeg(["-ss", f"{st:.2f}", "-i", str(src), "-t", f"{float(seg['end']) - st + margin:.2f}",
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-b:a", "192k", str(cut)])
@@ -183,12 +211,21 @@ def create_job(clip_id: str) -> Dict[str, Any]:
         "source_url": clip.get("source_url", ""),
         "source_duration": probe(cut)["duration"],
         "segment_in_cut": {"start": float(seg["start"]) - st, "end": float(seg["end"]) - st},
+        "parts_in_cut": [[float(a) - st, float(b) - st] for a, b in clip.get("parts") or []],
+        "accents_in_cut": [round(float(a) - st, 2) for a in clip.get("accents") or [] if float(a) >= st],
+        "slowmo_in_cut": ({"t": float(clip["slowmo"]["t"]) - st, "dur": float(clip["slowmo"].get("dur", 1.2))}
+                          if clip.get("slowmo") else None),
+        "transition": clip.get("transition", ""),
+        "story": (clip.get("ai") or {}).get("story", ""),
+        "subtitles": [{"start": round(float(x["start"]) - st, 2), "end": round(float(x["end"]) - st, 2), "text": x["text"]}
+                      for x in clip.get("subtitles") or [] if float(x["end"]) > st],
         "handle": s.get("brand_handle"),
         "ffmpeg": ffmpeg_bin(),
         "output_contract": ["output/final.mp4", "output/cover.jpg", "output/result.json", "output/status.txt"],
         "created": time.time(),
     }
     (job_dir / "job.json").write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
+    (inp / "subtitles.srt").write_text(to_srt(job["subtitles"]), encoding="utf-8")
     brief = build_brief(job, job_dir)
     (job_dir / "BRIEF.md").write_text(brief, encoding="utf-8")
 

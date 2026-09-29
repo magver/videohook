@@ -326,7 +326,10 @@ function renderEditor() {
   const st = S.state || {};
   const p = c.render?.params || {};
   const tpl = p.template || st.settings?.default_template || "cinema";
-  const eff = { color_pop: true, zoom_punch: true, flash: false, loudnorm: true, ...(p.effects || {}) };
+  const eff = { color_pop: true, zoom_punch: true, accent_zoom: true, flash: true, slowmo: true, impact_sfx: true, whoosh_sfx: true, punchy_audio: true, loudnorm: true, ...(p.effects || {}) };
+  const parts = (c.parts || []).length > 1 ? c.parts : null;
+  const subs = c.subtitles || [];
+  const subsSrc = { gemini: "Gemini", "youtube-manual": "YouTube", "youtube-auto": "автоперевод YouTube", "gemini-translate": "перевод Gemini" }[c.subtitles_source] || "";
   const seg = c.segment || { start: 0, end: 30 };
   const order = (st.stages || []).map((s) => s[0]);
   const si = order.indexOf(c.stage);
@@ -350,7 +353,10 @@ function renderEditor() {
           <h3 style="margin-top:14px">Лучшие отрезки</h3>
           <div class="sugs">${(c.suggestions || []).map((s, i) => `<div class="sugg" data-i="${i}"><span class="chip ${s.source === "gemini" ? "src-ai" : s.source === "heatmap" ? "src-youtube" : "src-manual"}">${{ gemini: "Gemini", heatmap: "Пересмотры", local: "Звук+динамика" }[s.source] || s.source}</span>
             <b>${fmtT(s.start)}–${fmtT(s.end)}</b><span class="muted" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.reason || "")}</span>${(s.confirmed_by || []).length ? `<span class="chip ok">✓ ${s.confirmed_by.length + 1} сигнала</span>` : ""}</div>`).join("") || '<small class="muted">нет данных</small>'}</div>
-          <button class="btn sm" style="margin-top:8px" id="e-ai" ${st.health?.gemini?.api || st.health?.gemini?.antigravity ? "" : "disabled title='Подключите Gemini в настройках'"}>✨ Gemini-анализ видео</button><small class="muted" style="display:block;margin-top:4px">Gemini смотрит исходник и предлагает отрезок, хук, реплики с таймингом и идеи монтажа</small>
+          ${c.ai?.story ? `<div class="log" style="margin-top:8px"><div>📖 ${esc(c.ai.story)}</div></div>` : ""}
+          ${parts ? `<small class="muted" style="display:block;margin-top:6px">Сцена собрана из ${parts.length} частей: ${parts.map((x) => fmtT(x[0]) + "–" + fmtT(x[1])).join(", ")} — затянутая середина вырезана</small>` : ""}
+          ${c.ru_dub ? `<span class="chip ok" style="margin-top:6px">🇷🇺 русская озвучка</span>` : ""}
+          <button class="btn sm" style="margin-top:8px" id="e-ai" ${st.health?.gemini?.api || st.health?.gemini?.antigravity ? "" : "disabled title='Подключите Gemini в настройках'"}>✨ Gemini-анализ видео</button><small class="muted" style="display:block;margin-top:4px">Gemini смотрит и слушает исходник: цельная сцена с завязкой и финалом, ударные моменты, замедление, русские субтитры</small>
         </div>
         <div class="stack">
           <label class="f">Хук (сверху, первые секунды решают всё)<input id="e-hook" value="${esc(c.hook)}" maxlength="70"></label>
@@ -359,8 +365,11 @@ function renderEditor() {
           <label class="f" id="e-comm-wrap" style="${tpl === "commentary" ? "" : "display:none"}">Авторский комментарий (для подложки «комментарий»)<textarea id="e-comm">${esc(c.commentary || "")}</textarea></label>
           <div class="grid g2"><label class="f">Музыка<select id="e-music"><option value="none">Без музыки (оригинал)</option>${Object.entries(st.music || {}).map(([k, n]) => `<option value="${k}" ${k === music ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
             <label class="f">Громкость музыки: <span id="mv">${Math.round((p.music_volume ?? st.settings?.music_volume ?? .22) * 100)}%</span><input type="range" id="e-mvol" min="0" max="0.6" step="0.02" value="${p.music_volume ?? st.settings?.music_volume ?? .22}"></label></div>
-          <div class="row">${[["zoom_punch", "Панч-зум в начале"], ["color_pop", "Сочные цвета"], ["flash", "Вспышка"], ["loudnorm", "Громкость −14 LUFS"]].map(([k, n]) => `<label class="chk"><input type="checkbox" data-eff="${k}" ${eff[k] ? "checked" : ""}> ${n}</label>`).join("")}
-            <label class="chk"><input type="checkbox" id="e-loop" ${(p.loop_friendly ?? st.settings?.loop_friendly ?? true) ? "checked" : ""}> Бесшовный луп</label>
+          <div class="grid g2"><label class="f">Переход между частями<select id="e-trans">${Object.entries(st.transitions || { auto: "Авто" }).map(([k, n]) => `<option value="${k}" ${k === (p.transition || c.transition || "auto") ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
+            <label class="f">Субтитры<label class="chk" style="margin-top:6px"><input type="checkbox" id="e-subs" ${subs.length && (p.use_subtitles ?? st.settings?.subtitles_mode !== "off") ? "checked" : ""} ${subs.length ? "" : "disabled"}> ${subs.length ? `русские: ${subs.length} реплик${subsSrc ? " (" + subsSrc + ")" : ""}` : "нет реплик — запустите Gemini-анализ"}</label></label></div>
+          <div class="row">${[["zoom_punch", "Панч-зум в начале"], ["accent_zoom", "Зум на ударах"], ["flash", "Вспышка на ударах"], ["slowmo", "Замедление кульминации"], ["color_pop", "Сочные цвета"]].map(([k, n]) => `<label class="chk"><input type="checkbox" data-eff="${k}" ${eff[k] ? "checked" : ""}> ${n}</label>`).join("")}</div>
+          <div class="row">${[["punchy_audio", "Плотный родной звук"], ["impact_sfx", "Удар по звуку"], ["whoosh_sfx", "«Вжух» на переходах"], ["loudnorm", "Громкость −14 LUFS"]].map(([k, n]) => `<label class="chk"><input type="checkbox" data-eff="${k}" ${eff[k] ? "checked" : ""}> ${n}</label>`).join("")}
+            <label class="chk"><input type="checkbox" id="e-loop" ${(p.loop_friendly ?? st.settings?.loop_friendly ?? false) ? "checked" : ""}> Мягкий луп</label>
             <label class="chk"><input type="checkbox" id="e-bar" ${(p.progress_bar ?? true) ? "checked" : ""}> Прогресс-бар</label></div>
           <small class="muted">Внизу всегда кредит: «${esc(c.credit)}» — ролик оформляется как фан-обзор, а не перезалив.</small>
           <div class="row"><button class="btn primary" id="e-render">🎬 Смонтировать 9:16</button>
@@ -410,7 +419,8 @@ function renderEditor() {
   $("#e-ai").onclick = () => act(() => api(`/api/clip/${c.id}/analyze`, {}), "Gemini смотрит видео…");
   const collect = () => ({
     template: $(".tpl.on")?.dataset.t || "cinema",
-    segments: [[+s0.value, +s1.value]],
+    segments: parts && Math.abs(parts[0][0] - +s0.value) < 0.6 && Math.abs(parts[parts.length - 1][1] - +s1.value) < 0.6 ? parts : [[+s0.value, +s1.value]],
+    transition: $("#e-trans").value, use_subtitles: $("#e-subs").checked,
     hook: $("#e-hook").value, caption: $("#e-cap").value, commentary: $("#e-comm").value,
     music: $("#e-music").value, music_volume: +$("#e-mvol").value,
     effects: Object.fromEntries($$("[data-eff]").map((x) => [x.dataset.eff, x.checked])),
@@ -556,8 +566,10 @@ function viewSettings() {
         <small class="${h.antigravity?.agentapi ? "ok-t" : "warn-t"}">${h.antigravity?.running ? "● подключено: " + esc(h.antigravity.cmd) : h.antigravity?.installed ? "● установлен — запустится при первой задаче" : "○ Antigravity не найден — будет ручная вставка промпта"}</small></div>
       <div class="card stack"><h2>Монтаж</h2>
         <label class="f">Подложка по умолчанию<select data-k="default_template">${Object.entries(tpl).map(([k, n]) => `<option value="${k}" ${s.default_template === k ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
-        <label class="f">Музыка по умолчанию<select data-k="default_music"><option value="auto" ${s.default_music === "auto" ? "selected" : ""}>Авто по настроению сцены</option><option value="none" ${s.default_music === "none" ? "selected" : ""}>Без музыки</option>${Object.entries(S.state?.music || {}).map(([k, n]) => `<option value="${k}" ${s.default_music === k ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
-        ${f("music_volume", "Громкость музыки (0–0.6)", "number")}${f("clip_max_seconds", "Максимальная длина ролика, c", "number")}${cb("loop_friendly", "Бесшовный луп по умолчанию")}</div>
+        <label class="f">Музыка по умолчанию<select data-k="default_music"><option value="none" ${s.default_music === "none" ? "selected" : ""}>Родной звук сцены (рекомендуется)</option><option value="auto" ${s.default_music === "auto" ? "selected" : ""}>Музыка по настроению сцены</option>${Object.entries(S.state?.music || {}).map(([k, n]) => `<option value="${k}" ${s.default_music === k ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
+        ${f("music_volume", "Громкость музыки (0–0.6)", "number")}${f("clip_max_seconds", "Максимальная длина ролика, c (сцена не обрезается короче нужного)", "number")}${cb("loop_friendly", "Мягкий луп по умолчанию (кроссфейд звука в конце)")}
+        <label class="f">Русские субтитры<select data-k="subtitles_mode"><option value="auto" ${s.subtitles_mode !== "off" ? "selected" : ""}>Добавлять, если есть реплики</option><option value="off" ${s.subtitles_mode === "off" ? "selected" : ""}>Не добавлять</option></select></label>
+        ${cb("prefer_ru_dub", "Искать источник с русской озвучкой в первую очередь")}</div>
       <div class="card stack"><h2>YouTube Shorts</h2>
         ${f("youtube_client_secret", "Путь к client_secret.json", "text", "Google Cloud Console → APIs → YouTube Data API v3 → OAuth-клиент «Приложение для ПК»")}
         <label class="f">Приватность при загрузке<select data-k="youtube_privacy">${["private", "unlisted", "public"].map((v) => `<option ${s.youtube_privacy === v ? "selected" : ""}>${v}</option>`).join("")}</select></label>

@@ -15,7 +15,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -206,47 +206,126 @@ def suggest_moments(anime_name: str, known_titles: List[str], count: int = 5,
 
 def analyze_video(path: str | Path, context: str, target_seconds: int = 35, mood: str = "",
                   hook: str = "", hints: Optional[List[Dict[str, Any]]] = None,
-                  storyboard: Optional[str] = None, progress=None) -> Dict[str, Any]:
-    """Смысловой разбор видео: лучшие отрезки, хук, реплики, идеи монтажа."""
-    lo, hi = max(10, target_seconds - 15), target_seconds + 10
+                  storyboard: Optional[str] = None, audio: Optional[str] = None, max_seconds: int = 58,
+                  ru_audio: bool = False, progress=None) -> Dict[str, Any]:
+    """Смысловой разбор видео: цельный отрезок-история, акценты, замедление, субтитры, хук, идеи монтажа."""
+    lo, hi = max(15, target_seconds - 10), max_seconds
     hint_txt = ""
     if hints:
         rows = [f"  - {h['start']:.0f}–{h['end']:.0f} c ({ {'heatmap': 'зрители YouTube пересматривают чаще всего', 'local': 'пик громкости и динамики монтажа'}.get(h.get('source'), h.get('source', '')) })"
                 for h in hints[:4]]
-        hint_txt = "Объективные сигналы (проверь их в первую очередь, но решай по содержанию):\n" + "\n".join(rows) + "\n"
-    sb_txt = ""
+        hint_txt = ("Объективные сигналы — где находится пик интереса (кульминация). Отрезок должен ВКЛЮЧАТЬ пик "
+                    "вместе с его завязкой и развязкой, а не начинаться с него:\n" + "\n".join(rows) + "\n")
+    media = []
     if storyboard:
-        sb_txt = ("Также есть раскадровка 4×4 (кадры слева направо, сверху вниз, равномерно по времени) — "
-                  "используй её, если не можешь посмотреть видео целиком.\n")
+        media.append("раскадровка 4×4 (кадры слева направо, сверху вниз, равномерно по времени)")
+    if audio:
+        media.append("аудиодорожка WAV того же файла — слушай её для реплик и субтитров")
+    media_txt = ("Дополнительно даны: " + "; ".join(media) + ".\n") if media else ""
+    subs_rule = ("Звук на русском (русская озвучка): субтитры — точная расшифровка русской речи."
+                 if ru_audio else
+                 "Если речь не на русском — переведи на естественный разговорный русский (не дословно), "
+                 "сохраняя смысл, характер персонажа и длину фразы.")
     prompt = f"""Проанализируй видео — это фрагмент аниме ({context}).
 Настроение сцены: {mood or 'определи сам'}.{f' Рабочий хук: «{hook}».' if hook else ''}
-Задача: выбрать отрезки для вирусного вертикального ролика длиной {lo}–{hi} секунд.
-Критерии: сильный визуальный хук в первые 2 секунды, кульминация внутри отрезка, законченная мысль, возможность зациклить.
-Избегай: заставок, титров, чёрных кадров, чужих надписей/водяных знаков на весь экран, статичных кадров без действия.
-{hint_txt}{sb_txt}Тон текстов: {_voice(mood)}.
+{media_txt}
+ЗАДАЧА: выбрать отрезок для вертикального ролика, который зритель поймёт БЕЗ контекста и досмотрит до конца.
+Длина {lo}–{hi} c: бери столько, сколько нужно для законченной истории, не укорачивай ради цифры.
+
+Правила выбора границ (самое важное):
+1. Отрезок — законченная мини-история: завязка (кто, что происходит, 2–6 c) → нарастание → кульминация → развязка/реакция.
+2. НАЧАЛО — на смене плана или в паузе ПЕРЕД первой репликой завязки. Никогда не начинай посреди фразы или движения.
+3. КОНЕЦ — после последней реплики и реакции на кульминацию (взгляд, падение, тишина, реакция других героев),
+   на смене плана или в паузе. Никогда не обрывай фразу, удар или музыкальную фразу. Лучше на 3 c длиннее, чем обрезать суть.
+4. Если сцена длиннее {hi} c — не режь её пополам: верни 2–4 части ("parts"), выбросив затянутую середину
+   (повторы, долгие проходы, флешбеки), но сохранив завязку и финал. Каждая часть тоже начинается и заканчивается на границе фразы.
+5. Избегай заставок, титров, превью следующей серии, чёрных кадров, чужих водяных знаков на весь экран.
+{hint_txt}
+Монтаж (время — в секундах от начала этого файла):
+- "accents": 2–6 ударных моментов (удар, взрыв, резкий поворот головы, ключевое слово) — туда встанут панч-зум, вспышка и низкий удар звука;
+- "slowmo": один момент кульминации для замедления (t — центр, dur 0.8–1.6 c), или null, если замедление убьёт сцену (диалог, комедия);
+- "transition": переход между частями — fadewhite (эпик), fadeblack (мрак, драма), dissolve (эмоции), zoomin (поворот), slideleft (комедия), cut;
+- музыку не предлагай: используется родной звук сцены.
+
+Субтитры: "subtitles" — ВСЕ реплики внутри выбранного отрезка (всех частей), по одной фразе, start/end по речи.
+{subs_rule} Если речи нет — пустой список. "dialogue_heavy": true, если сцена держится на диалоге.
+Тон хука/подписи: {_voice(mood)}.
+
 Верни JSON:
-{{"segments": [{{"start": сек, "end": сек, "score": 0..1, "reason": "почему"}}] (до 4, по убыванию score),
+{{"parts": [{{"start": сек, "end": сек}}] (1–4 части по порядку; одна часть, если сцена укладывается),
+ "segments": [{{"start": сек, "end": сек, "score": 0..1, "reason": "почему"}}] (до 3 альтернатив цельных отрезков, по убыванию score; первый = охват parts),
+ "story": "одной фразой: завязка → кульминация → развязка",
  "hook": "заголовок-хук до 45 символов без эмодзи",
- "caption": "короткая подпись/цитата на русском для экрана, до 70 символов",
- "key_lines": [{{"t": сек, "text": "реплика на русском"}}] (до 8 ключевых реплик внутри лучшего отрезка; если речи нет — пустой список),
- "edit_ideas": ["идеи монтажа: зум на секунде X, стоп-кадр, смена ритма…"],
- "mood": "{MOODS}"}}
-Время — в секундах от начала этого файла."""
-    local = [str(path)] + ([storyboard] if storyboard else [])
-    data = parse_json(generate(prompt, local_paths=local, temperature=0.4, task_name="analyze", progress=progress))
+ "caption": "короткая подпись/контекст на русском для экрана, до 70 символов",
+ "accents": [сек, ...],
+ "slowmo": {{"t": сек, "dur": сек}} или null,
+ "transition": "…",
+ "subtitles": [{{"start": сек, "end": сек, "text": "реплика на русском"}}],
+ "dialogue_heavy": true/false,
+ "edit_ideas": ["что ещё сделать в монтаже"],
+ "mood": "{MOODS}"}}"""
+    local = [str(path)] + [p for p in (storyboard, audio) if p]
+    data = parse_json(generate(prompt, local_paths=local, temperature=0.3, task_name="analyze", progress=progress))
     if not isinstance(data, dict):
         raise RuntimeError("Gemini вернул неожиданный формат анализа")
-    segs = []
-    for s in data.get("segments", []):
+
+    def _span(x: Any) -> Optional[Tuple[float, float]]:
         try:
-            st, en = float(s["start"]), float(s["end"])
+            st, en = float(x["start"]), float(x["end"])
         except (KeyError, TypeError, ValueError):
-            continue
-        if en > st:
-            segs.append({"start": round(st, 2), "end": round(en, 2), "score": float(s.get("score", 0.8)),
+            return None
+        return (st, en) if en > st else None
+
+    segs = []
+    for s in data.get("segments") or []:
+        sp = _span(s)
+        if sp:
+            segs.append({"start": round(sp[0], 2), "end": round(sp[1], 2), "score": float(s.get("score", 0.8)),
                          "source": "gemini", "reason": s.get("reason", "Gemini")})
+    parts = [sp for sp in (_span(p) for p in data.get("parts") or []) if sp]
+    parts.sort()
+    if parts:
+        whole = {"start": round(parts[0][0], 2), "end": round(parts[-1][1], 2), "score": 1.0, "source": "gemini",
+                 "reason": data.get("story") or "Цельная история по Gemini"}
+        segs = [whole] + [s for s in segs if abs(s["start"] - whole["start"]) > 1 or abs(s["end"] - whole["end"]) > 1]
     data["segments"] = segs
+    data["parts"] = [[round(a, 2), round(b, 2)] for a, b in parts]
+    subs = []
+    for x in data.get("subtitles") or []:
+        sp = _span(x)
+        if sp and str(x.get("text", "")).strip():
+            subs.append({"start": round(sp[0], 2), "end": round(sp[1], 2), "text": str(x["text"]).strip()})
+    data["subtitles"] = subs
+    acc = []
+    for a in data.get("accents") or []:
+        try:
+            acc.append(round(float(a if not isinstance(a, dict) else a.get("t")), 2))
+        except (TypeError, ValueError):
+            continue
+    data["accents"] = sorted(set(acc))
+    sm = data.get("slowmo")
+    try:
+        data["slowmo"] = {"t": float(sm["t"]), "dur": max(0.6, min(2.0, float(sm.get("dur", 1.2)))), "factor": 0.5} if sm else None
+    except (KeyError, TypeError, ValueError):
+        data["slowmo"] = None
     return data
+
+
+def translate_subtitles(items: List[Dict[str, Any]], context: str, lang: str = "") -> List[Dict[str, Any]]:
+    """Перевод субтитров на русский с сохранением таймингов (для роликов без русской озвучки)."""
+    if not items:
+        return []
+    rows = [{"i": i, "text": x["text"]} for i, x in enumerate(items)]
+    prompt = f"""Переведи субтитры сцены аниме ({context}) на естественный разговорный русский{f' с языка {lang}' if lang else ''}.
+Правила: сохраняй характер речи персонажей и имена в русской традиции перевода; не добавляй пояснений;
+если строка — автоматическое распознавание с ошибками, восстанови смысл по контексту; звуки и [музыка] — пустая строка.
+Строк столько же, сколько на входе, те же номера i.
+Вход: {json.dumps(rows, ensure_ascii=False)}
+Верни JSON: {{"lines": [{{"i": 0, "text": "перевод"}}, ...]}}"""
+    data = parse_json(generate(prompt, temperature=0.3, task_name="subtitles"))
+    lines = data.get("lines", []) if isinstance(data, dict) else data
+    tr = {int(x["i"]): str(x.get("text", "")).strip() for x in lines or [] if isinstance(x, dict) and "i" in x}
+    return [{**x, "text": tr[i]} for i, x in enumerate(items) if tr.get(i)]
 
 
 def write_captions(clip: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, Any]:

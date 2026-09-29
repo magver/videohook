@@ -15,6 +15,7 @@ import math
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -125,7 +126,90 @@ def video_info(url: str) -> Dict[str, Any]:
         "heatmap": info.get("heatmap") or [],
         "chapters": info.get("chapters") or [],
         "extractor": info.get("extractor_key", ""),
+        "subs_ru": _pick_ru_subs(info),
+        "ru_dub": is_ru_dub(info.get("title", "")),
     }
+
+
+RU_DUB = re.compile(r"озвуч|дубляж|русск|на русском|\brus\b|\bru\b|anilibria|анилибри|anidub|анидаб|studio ?band|"
+                    r"jam ?club|shiza|шиза|animevost|аниме ?вост|dream ?cast|amazing ?dubbing", re.I)
+
+
+def is_ru_dub(title: str) -> bool:
+    """Ролик с русской озвучкой (по названию: студии озвучки, «русская озвучка», «дубляж»)."""
+    return bool(RU_DUB.search(title or ""))
+
+
+def _pick_ru_subs(info: Dict[str, Any]) -> Dict[str, str]:
+    """Субтитры YouTube (json3): ручные русские, иначе автоперевод на русский.
+    orig_url — те же субтитры без перевода: YouTube часто ограничивает автоперевод (429), тогда
+    оригинал переводится через ИИ."""
+    for kind, pool in (("manual", info.get("subtitles") or {}), ("auto", info.get("automatic_captions") or {})):
+        for lang in ("ru", "ru-RU", "ru-orig"):
+            fmts = pool.get(lang) or []
+            f = next((x for x in fmts if x.get("ext") == "json3"), None)
+            if f and f.get("url"):
+                url = f["url"]
+                orig = re.sub(r"&tlang=[^&]+", "", url) if "tlang=" in url else ""
+                m = re.search(r"[?&]lang=([\w-]+)", orig)
+                return {"kind": kind, "url": url, "lang": "ru", "orig_url": orig,
+                        "orig_lang": m.group(1) if m else ""}
+    for lang in ("en", "en-US", "en-GB"):
+        f = next((x for x in (info.get("subtitles") or {}).get(lang) or [] if x.get("ext") == "json3"), None)
+        if f and f.get("url"):
+            return {"kind": "manual", "url": "", "lang": "", "orig_url": f["url"], "orig_lang": lang}
+    return {}
+
+
+def _get_json(url: str, tries: int = 2) -> Dict[str, Any]:
+    import json as _json
+
+    last: Optional[Exception] = None
+    for i in range(tries):
+        try:
+            with _ydl({}) as ydl:   # сессия yt-dlp: те же заголовки и куки, что и при извлечении
+                return _json.loads(ydl.urlopen(url).read().decode("utf-8", "replace"))
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            time.sleep(2.5 * (i + 1))
+    raise RuntimeError(f"субтитры недоступны: {last}")
+
+
+def _parse_json3(data: Dict[str, Any], t0: float, t1: float) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for ev in data.get("events") or []:
+        text = "".join(sg.get("utf8", "") for sg in ev.get("segs") or []).replace("\n", " ").strip()
+        if not text or "tStartMs" not in ev:
+            continue
+        st = ev["tStartMs"] / 1000.0
+        en = st + (ev.get("dDurationMs") or 2000) / 1000.0
+        if en < t0 or st > t1:
+            continue
+        if out and (text == out[-1]["text"] or out[-1]["text"].endswith(text)):
+            out[-1]["end"] = max(out[-1]["end"], en)
+            continue
+        if out and out[-1]["end"] > st:
+            out[-1]["end"] = st
+        out.append({"start": round(st, 2), "end": round(en, 2), "text": re.sub(r"\s+", " ", text)})
+    return out
+
+
+def fetch_subtitles(subs: Dict[str, str], t0: float = 0.0, t1: float = 1e9) -> Dict[str, Any]:
+    """Фразы субтитров [{start, end, text}] в интервале [t0, t1] (время видео) и их язык.
+    Сначала русские; если автоперевод недоступен — оригинал (lang != "ru", нужен перевод)."""
+    errors = []
+    for url, lang in ((subs.get("url"), subs.get("lang") or "ru"), (subs.get("orig_url"), subs.get("orig_lang") or "")):
+        if not url:
+            continue
+        try:
+            items = _parse_json3(_get_json(url), t0, t1)
+            if items:
+                return {"items": items, "lang": lang}
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc)[:120])
+    if errors:
+        log.info("subtitles: %s", "; ".join(errors))
+    return {"items": [], "lang": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +304,86 @@ def local_windows(path: str | Path, window: float = 30.0, top_k: int = 3,
     return _nms(candidates, window, top_k, "local", "Громкость и динамика монтажа")
 
 
+def speech_pauses(env: List[float], hop: float, min_len: float = 0.25) -> List[float]:
+    """Середины пауз (тишина между фразами) по RMS-огибающей."""
+    if not env:
+        return []
+    srt = sorted(env)
+    loud = srt[int(len(srt) * 0.9)] or 1.0
+    quiet = max(srt[int(len(srt) * 0.2)] * 1.3, loud * 0.12)
+    pauses, run = [], 0
+    for i, v in enumerate(env + [loud]):
+        if v <= quiet:
+            run += 1
+        else:
+            if run * hop >= min_len:
+                pauses.append(round((i - run / 2) * hop, 2))
+            run = 0
+    return pauses
+
+
+def refine_bounds(path: str | Path, start: float, end: float, min_len: float = 18.0,
+                  max_len: float = 58.0) -> Dict[str, Any]:
+    """Сдвигает границы отрезка к естественным точкам: начало — к склейке/паузе перед завязкой,
+    конец — к паузе после последней фразы или к смене сцены. Отрезок не рвёт реплику посередине."""
+    info = probe(path)
+    dur = info["duration"] or end
+    hop = 0.1
+    env = audio_envelope(path, hop=hop) if info["has_audio"] else []
+    cuts = scene_cuts(path)
+    pauses = speech_pauses(env, hop)
+
+    def near(points, t, tol=0.35):
+        return any(abs(p - t) <= tol for p in points)
+
+    # начало: окно [start-8, start+1.5], ближе к исходному — лучше; склейка в тишине — идеал
+    best_s, best_sc = start, 0.0
+    for c in sorted(set([round(x, 2) for x in cuts + pauses])):
+        if not (start - 8.0 <= c <= start + 1.5) or c < 0:
+            continue
+        sc = (1.2 if near(cuts, c, 0.05) else 0) + (1.0 if near(pauses, c) else 0) - 0.12 * abs(c - start)
+        if sc > best_sc:
+            best_s, best_sc = c, sc
+    # конец: окно [end-1.5, end+10], с учётом максимальной длины; пауза после фразы важнее склейки
+    hi = min(dur, best_s + max_len, end + 10.0)
+    best_e, best_ec = min(end, hi), 0.0
+    for c in sorted(set([round(x, 2) for x in cuts + pauses])):
+        if not (end - 1.5 <= c <= hi):
+            continue
+        sc = (1.4 if near(pauses, c) else 0) + (1.0 if near(cuts, c, 0.05) else 0) - 0.08 * abs(c - end)
+        if sc > best_ec:
+            best_e, best_ec = c, sc
+    if near(pauses, best_e) and not near(cuts, best_e, 0.05):
+        best_e = min(hi, best_e + 0.4)  # дать реакции/звуку договорить
+    if best_e - best_s < min_len:
+        best_e = min(dur, best_s + min_len)
+    return {"start": round(max(0.0, best_s), 2), "end": round(min(dur, best_e), 2),
+            "snapped": bool(best_sc > 0 or best_ec > 0)}
+
+
+def audio_peaks(path: str | Path, start: float, end: float, n: int = 3, min_gap: float = 4.0) -> List[float]:
+    """Ударные моменты отрезка без ИИ: самые резкие всплески громкости (удары, взрывы, крики)."""
+    hop = 0.1
+    env = audio_envelope(path, hop=hop)
+    if not env:
+        return []
+    i0, i1 = int(start / hop) + 10, min(len(env), int(end / hop) - 10)   # не у самых краёв
+    onsets = []
+    for i in range(max(i0, 5), i1):
+        prev = sum(env[i - 5:i]) / 5 or 1.0
+        onsets.append((env[i] / prev * env[i], round(i * hop, 2)))
+    peak = max((v for v, _ in onsets), default=0) or 1.0
+    picked: List[float] = []
+    for v, t in sorted(onsets, reverse=True):
+        if v < peak * 0.35:
+            break
+        if all(abs(t - p) >= min_gap for p in picked):
+            picked.append(t)
+        if len(picked) >= n:
+            break
+    return sorted(picked)
+
+
 def merge_suggestions(*groups: List[Dict[str, Any]], top_k: int = 5) -> List[Dict[str, Any]]:
     """Объединяет подсказки разных источников: совпадающие по времени усиливают друг друга."""
     weights = {"gemini": 1.0, "heatmap": 0.9, "local": 0.6}
@@ -251,7 +415,8 @@ def source_queries(moment: Dict[str, Any]) -> List[str]:
     title = (moment.get("title") or "").strip()
     en = (moment.get("anime_en") or "").strip()
     ru = (moment.get("anime_ru") or moment.get("anime") or "").strip()
-    qs = [moment.get("query_en"), moment.get("query"),
+    dub = [f"{ru} {title} русская озвучка"] if moment.get("prefer_ru_dub") and ru and title else []
+    qs = [moment.get("query_en"), *dub, moment.get("query"),
           f"{en} {moment.get('query_en') or title} scene" if en and moment.get("query_en") and en.lower() not in moment["query_en"].lower() else "",
           f"{ru} {title}" if ru and title else "",
           f"{en} {title}" if en and title else "",
@@ -279,13 +444,16 @@ def find_source_for_moment(moment: Dict[str, Any], anime: Optional[Dict[str, Any
     seen = set()
     errors: List[str] = []
     for i, q in enumerate(source_queries(moment)):
-        if len(results) >= want and i >= 2:
+        if len(results) >= want and i >= 3:
             break
         try:
             for v in search_videos(q, limit=10, min_dur=20, max_dur=1800):
                 if v["id"] and v["id"] not in seen:
                     seen.add(v["id"])
-                    v["rank_bonus"] = 1.0 if i < 2 else 0.8   # точные запросы важнее общих
+                    v["rank_bonus"] = 1.0 if i < 3 else 0.8   # точные запросы важнее общих
+                    v["ru_dub"] = is_ru_dub(v["title"])
+                    if v["ru_dub"] and moment.get("prefer_ru_dub"):
+                        v["rank_bonus"] *= 1.35                # русская озвучка — в приоритете
                     results.append(v)
         except Exception as exc:  # noqa: BLE001
             log.warning("search %s: %s", q, exc)

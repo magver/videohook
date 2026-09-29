@@ -138,6 +138,12 @@ def extract_thumbnail(path: str, out_path: str, at: Optional[float] = None) -> s
     return out_path
 
 
+def extract_audio(path: str, out_path: str) -> str:
+    """Звуковая дорожка 16 кГц моно WAV — чтобы агент Antigravity услышал реплики."""
+    run_ffmpeg(["-i", str(path), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(out_path)])
+    return out_path
+
+
 def contact_sheet(path: str, out_path: str, cols: int = 4, rows: int = 4) -> str:
     """Раскадровка с таймкодами — отдаётся агенту Antigravity для визуального анализа."""
     dur = probe(path)["duration"] or 1
@@ -184,6 +190,7 @@ def build_ass(params: Dict[str, Any], duration: float, video_box: Tuple[int, int
         ("Label", 34, "#FFFFFF", "#000000", "#000000", 1, 1, 3, 0, 8, 0),
         ("Caption", 60, "#FFFFFF", "#000000", "#000000", 1, 1, 6, 2, 2, 0),
         ("Lines", 58, "#FFFFFF", "#000000", "#000000", 1, 1, 6, 2, 2, 0),
+        ("Subs", 54, "#FFFFFF", "#000000", "#000000", 1, 1, 5, 2, 2, 0),
         ("Comment", 44, "#F5F5F5", "#101014", "#000000", 0, 3, 14, 0, 7, 0),
         ("Handle", 38, accent, "#000000", "#000000", 1, 1, 3, 0, 2, 0),
         ("Credit", 26, "#D4D4D8", "#000000", "#000000", 0, 1, 2, 0, 2, 0),
@@ -222,10 +229,18 @@ def build_ass(params: Dict[str, Any], duration: float, video_box: Tuple[int, int
     if hook:
         ev("Hook", hook, W // 2, hook_y, extra="\\fad(120,0)\\fscx70\\fscy70\\t(0,220,\\fscx100\\fscy100)", layer=2)
 
-    # --- нижняя зона: реплики по таймингу или статичная подпись
+    # --- нижняя зона: субтитры / реплики по таймингу или статичная подпись
     key_lines = params.get("key_lines") or []
+    subtitles = params.get("subtitles") or []
     cap_y = bottom_zone + 170 if not fullscreen else H - 420
-    if template == "commentary":
+    if subtitles:
+        for sub in subtitles:
+            for st, en, txt in subtitle_chunks(sub):
+                if txt and st < duration:
+                    ev("Subs", txt, W // 2, cap_y, st, min(duration, en), extra="\\fad(60,60)")
+        if template == "commentary" and caption:
+            ev("Caption", caption, W // 2, bottom_zone + 330, 0.4, extra="\\fad(250,0)")
+    elif template == "commentary":
         comment = clean_text(params.get("commentary") or caption)
         if comment:
             lines.append(f"Dialogue: 1,{_ass_time(0.3)},{end},Comment,,0,0,0,,"
@@ -260,7 +275,53 @@ def build_ass(params: Dict[str, Any], duration: float, video_box: Tuple[int, int
 # ---------------------------------------------------------------------------
 # Рендер
 # ---------------------------------------------------------------------------
-DEFAULT_EFFECTS = {"color_pop": True, "zoom_punch": True, "flash": False, "loudnorm": True}
+DEFAULT_EFFECTS = {
+    "color_pop": True,       # сочные цвета
+    "zoom_punch": True,      # панч-зум на первом кадре
+    "accent_zoom": True,     # панч-зумы на ударных моментах
+    "flash": True,           # короткая вспышка на кульминации
+    "slowmo": True,          # замедление кульминации (если задан момент)
+    "impact_sfx": True,      # низкий «удар» на акцентах
+    "whoosh_sfx": True,      # «вжух» на переходах между частями
+    "punchy_audio": True,    # компрессия и бас оригинальной дорожки
+    "loudnorm": True,        # громкость −14 LUFS
+}
+
+# переход между частями ролика по настроению сцены (фильтр xfade)
+MOOD_TRANSITIONS = {
+    "epic": "fadewhite", "dark": "fadeblack", "twist": "zoomin", "emotional": "dissolve",
+    "romantic": "dissolve", "funny": "slideleft",
+}
+TRANSITIONS = {
+    "auto": "Авто по настроению", "cut": "Жёсткая склейка", "fadewhite": "Вспышка", "fadeblack": "Через чёрный",
+    "dissolve": "Растворение", "zoomin": "Зум", "slideleft": "Сдвиг", "smoothup": "Плавный вверх",
+    "circleopen": "Круг", "pixelize": "Пикселизация",
+}
+XFADE_DUR = 0.35
+
+
+def subtitle_chunks(sub: Dict[str, Any], max_chars: int = 42) -> List[Tuple[float, float, str]]:
+    """Длинная реплика → куски по 1–2 строки, время делится пропорционально длине текста."""
+    txt = clean_text(sub.get("text", ""))
+    st, en = float(sub.get("start", 0)), float(sub.get("end", 0))
+    if not txt or en <= st:
+        return []
+    words, chunks, cur = txt.split(), [], ""
+    for w in words:
+        if cur and len(cur) + 1 + len(w) > max_chars * 2:
+            chunks.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    if cur:
+        chunks.append(cur)
+    total = sum(len(c) for c in chunks) or 1
+    out, t = [], st
+    for c in chunks:
+        d = (en - st) * len(c) / total
+        out.append((round(t, 2), round(t + d, 2), c))
+        t += d
+    return out
 
 
 def plan_segments(segments: List[Tuple[float, float]], src_dur: float, cap: float) -> List[Tuple[float, float]]:
@@ -277,6 +338,62 @@ def plan_segments(segments: List[Tuple[float, float]], src_dur: float, cap: floa
     return out
 
 
+class Timeline:
+    """Части исходника → выходная шкала времени (с замедлением и наложением переходов)."""
+
+    def __init__(self, segments: List[Tuple[float, float]], slowmo: Optional[Dict[str, Any]] = None,
+                 xfade: float = 0.0):
+        self.xfade = xfade if len(segments) > 1 else 0.0
+        self.pieces: List[List[Tuple[float, float, float]]] = []
+        for s, e in segments:
+            parts = [(s, e, 1.0)]
+            if slowmo:
+                t0 = float(slowmo.get("t", -1))
+                d = float(slowmo.get("dur", 1.2))
+                f = max(0.5, min(0.9, float(slowmo.get("factor", 0.5))))
+                a, b = max(s, t0 - d / 2), min(e, t0 + d / 2)
+                if b - a >= 0.4:
+                    parts = [p for p in ((s, a, 1.0), (a, b, f), (b, e, 1.0)) if p[1] - p[0] > 0.05]
+            self.pieces.append(parts)
+        self.seg_durs = [sum((e - s) / sp for s, e, sp in parts) for parts in self.pieces]
+        self.seg_starts, acc = [], 0.0
+        for i, d in enumerate(self.seg_durs):
+            self.seg_starts.append(acc)
+            acc += d - self.xfade
+        self.duration = sum(self.seg_durs) - self.xfade * (len(self.seg_durs) - 1)
+
+    def map(self, t: float) -> Optional[float]:
+        for i, parts in enumerate(self.pieces):
+            out = self.seg_starts[i]
+            for s, e, sp in parts:
+                if s <= t <= e:
+                    return round(out + (t - s) / sp, 3)
+                out += (e - s) / sp
+        return None
+
+    def transitions(self) -> List[float]:
+        """Середины переходов на выходной шкале."""
+        return [self.seg_starts[i] + self.xfade / 2 for i in range(1, len(self.pieces))]
+
+
+def map_items(tl: Timeline, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out = []
+    for it in items or []:
+        st = tl.map(float(it["start"]))
+        en = tl.map(float(it["end"]))
+        if st is None and en is None:
+            continue
+        st = st if st is not None else 0.0
+        en = en if en is not None else min(tl.duration, st + 3.0)
+        if en > st:
+            out.append({**it, "start": st, "end": en})
+    return out
+
+
+def _pulses(times: List[float], amp: float, width: float) -> str:
+    return "+".join(f"{amp}*exp(-pow((it-{t:.2f})/{width},2))" for t in times) or "0"
+
+
 def render(source: str, params: Dict[str, Any], out_path: Optional[str] = None,
            progress: Optional[Callable[[float], None]] = None) -> Dict[str, Any]:
     src = Path(source)
@@ -288,13 +405,25 @@ def render(source: str, params: Dict[str, Any], out_path: Optional[str] = None,
     cap = float(params.get("max_seconds") or 59)
     segments = plan_segments([tuple(s) for s in params.get("segments") or []], info["duration"], cap)
 
-    if params.get("loop_friendly") and len(segments) == 1:
+    # подгонка конца под первый кадр — только по явному запросу: иначе обрезается финал сцены
+    if params.get("loop_trim") and len(segments) == 1:
         s, e = segments[0]
-        segments = [(s, find_loop_end(str(src), s, e))]
+        segments = [(s, find_loop_end(str(src), s, e, search=1.0))]
 
+    transition = params.get("transition") or "auto"
+    if transition == "auto":
+        transition = MOOD_TRANSITIONS.get(params.get("mood", "epic"), "fadewhite")
+    xd = XFADE_DUR if transition != "cut" and len(segments) > 1 else 0.0
+    slowmo = params.get("slowmo") if effects.get("slowmo") else None
+    tl = Timeline(segments, slowmo, xd)
     speed = float(params.get("speed") or 1.0)
-    total = sum(e - s for s, e in segments)
-    duration = total / speed
+    duration = tl.duration / speed
+
+    accents = sorted({round(t / speed, 2) for t in (tl.map(float(a)) for a in params.get("accents") or [])
+                      if t is not None and 0.3 < t < tl.duration - 0.3})[:10]
+    trans_times = [t / speed for t in tl.transitions()]
+    subtitles = [{**x, "start": x["start"] / speed, "end": x["end"] / speed}
+                 for x in map_items(tl, params.get("subtitles") or [])]
 
     work = TMP_DIR / new_id("r_")
     (work / "fonts").mkdir(parents=True, exist_ok=True)
@@ -307,23 +436,44 @@ def render(source: str, params: Dict[str, Any], out_path: Optional[str] = None,
 
     fc: List[str] = []
     has_audio = info["has_audio"]
-    # 1. нарезка и склейка
-    if len(segments) == 1:
-        s, e = segments[0]
-        fc.append(f"[0:v]trim=start={s}:end={e},setpts=PTS-STARTPTS[vcat]")
-        if has_audio:
-            fc.append(f"[0:a]atrim=start={s}:end={e},asetpts=PTS-STARTPTS[acat]")
-    else:
-        for i, (s, e) in enumerate(segments):
-            fc.append(f"[0:v]trim=start={s}:end={e},setpts=PTS-STARTPTS[v{i}]")
+    # 1. нарезка: части сегмента (с замедлением) склеиваются встык, сегменты — через переход
+    for i, parts in enumerate(tl.pieces):
+        for j, (s, e, sp) in enumerate(parts):
+            fc.append(f"[0:v]trim=start={s}:end={e},setpts=(PTS-STARTPTS)/{sp},fps=30,setsar=1,format=yuv420p[v{i}_{j}]")
             if has_audio:
-                fc.append(f"[0:a]atrim=start={s}:end={e},asetpts=PTS-STARTPTS[a{i}]")
-        if has_audio:
-            ins = "".join(f"[v{i}][a{i}]" for i in range(len(segments)))
-            fc.append(f"{ins}concat=n={len(segments)}:v=1:a=1[vcat][acat]")
+                fc.append(f"[0:a]atrim=start={s}:end={e},asetpts=PTS-STARTPTS"
+                          + (f",atempo={sp}" if sp != 1.0 else "") + f",aresample=44100[a{i}_{j}]")
+        n = len(parts)
+        if n == 1:
+            fc.append(f"[v{i}_0]settb=1/30[vs{i}]")
+            if has_audio:
+                fc.append(f"[a{i}_0]anull[as{i}]")
+        elif has_audio:
+            ins = "".join(f"[v{i}_{j}][a{i}_{j}]" for j in range(n))
+            fc.append(f"{ins}concat=n={n}:v=1:a=1[vc{i}][as{i}]")
+            fc.append(f"[vc{i}]fps=30,settb=1/30[vs{i}]")
         else:
-            ins = "".join(f"[v{i}]" for i in range(len(segments)))
-            fc.append(f"{ins}concat=n={len(segments)}:v=1:a=0[vcat]")
+            ins = "".join(f"[v{i}_{j}]" for j in range(n))
+            fc.append(f"{ins}concat=n={n}:v=1:a=0[vc{i}]")
+            fc.append(f"[vc{i}]fps=30,settb=1/30[vs{i}]")
+    vprev, aprev = "[vs0]", "[as0]"
+    acc = tl.seg_durs[0]
+    for i in range(1, len(tl.pieces)):
+        if xd:
+            fc.append(f"{vprev}[vs{i}]xfade=transition={transition}:duration={xd}:offset={acc - xd:.3f}[vx{i}]")
+            if has_audio:
+                fc.append(f"{aprev}[as{i}]acrossfade=d={xd}[ax{i}]")
+            acc += tl.seg_durs[i] - xd
+        else:
+            if has_audio:
+                fc.append(f"{vprev}{aprev}[vs{i}][as{i}]concat=n=2:v=1:a=1[vx{i}][ax{i}]")
+            else:
+                fc.append(f"{vprev}[vs{i}]concat=n=2:v=1:a=0[vx{i}]")
+            acc += tl.seg_durs[i]
+        vprev, aprev = f"[vx{i}]", f"[ax{i}]"
+    fc.append(f"{vprev}null[vcat]")
+    if has_audio:
+        fc.append(f"{aprev}anull[acat]")
 
     grade = "eq=saturation=1.18:contrast=1.06:brightness=0.01," if effects.get("color_pop") else ""
     sw, sh = info["width"] or 1920, info["height"] or 1080
@@ -355,46 +505,74 @@ def render(source: str, params: Dict[str, Any], out_path: Optional[str] = None,
         box = (x_off, y_off, fg_w, fg_h)
 
     cur = "[base]"
-    # 3. эффекты
-    if effects.get("zoom_punch"):
-        fc.append(f"{cur}zoompan=z='if(lt(it,0.7),1.14-0.2*it,1)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-                  f"s={W}x{H}:fps=30[zp]")
-        cur = "[zp]"
-    if effects.get("flash"):
-        fc.append(f"{cur}fade=t=in:st=0:d=0.25:color=white[fl]")
-        cur = "[fl]"
     if speed != 1.0:
         fc.append(f"{cur}setpts=PTS/{speed:.4f}[sp]")
         cur = "[sp]"
+    # 3. эффекты: панч-зум на старте и на ударных моментах, вспышки на кульминации
+    zoom_terms = []
+    if effects.get("zoom_punch"):
+        zoom_terms.append("if(lt(it,0.7),0.14-0.2*it,0)")
+    if effects.get("accent_zoom") and accents:
+        zoom_terms.append(_pulses(accents, 0.09, 0.16))
+    if zoom_terms:
+        fc.append(f"{cur}zoompan=z='1+{'+'.join(zoom_terms)}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                  f"s={W}x{H}:fps=30[zp]")
+        cur = "[zp]"
+    if effects.get("flash"):
+        flashes = accents[:3] if accents else []
+        if flashes:
+            en = "+".join(f"between(t,{t:.2f},{t + 0.07:.2f})" for t in flashes)
+            fc.append(f"{cur}eq=brightness=0.28:contrast=1.1:enable='{en}'[fl]")
+            cur = "[fl]"
     # 4. надписи
-    ass_text = build_ass({**params, "template": template}, duration, box)
+    ass_text = build_ass({**params, "template": template, "subtitles": subtitles}, duration, box)
     (work / "overlay.ass").write_text(ass_text, encoding="utf-8")
     fc.append(f"{cur}ass=overlay.ass:fontsdir=fonts,format=yuv420p[vout]")
 
-    # 5. звук
+    # 5. звук: оригинальная дорожка — основа; музыка и эффекты — поверх
     inputs = ["-i", str(src.resolve())]
     mpath = music_path(params.get("music", "none"))
     dialog_vol = float(params.get("dialog_volume", 1.0))
     music_vol = float(params.get("music_volume", 0.22))
     if has_audio:
         a_chain = f"[acat]volume={dialog_vol:.2f}"
+        if effects.get("punchy_audio"):
+            a_chain += ",acompressor=threshold=0.1:ratio=3:attack=8:release=160:makeup=1.6,bass=g=3:f=110"
         if speed != 1.0:
             a_chain += f",atempo={speed:.4f}"
-        fc.append(a_chain + "[dia]")
+        fc.append(a_chain + ",aformat=sample_rates=44100:channel_layouts=stereo[dia]")
     else:
         fc.append(f"anullsrc=r=44100:cl=stereo,atrim=0:{duration:.3f}[dia]")
+    mix = ["[dia]"]
     if mpath:
         inputs += ["-stream_loop", "-1", "-i", str(mpath.resolve())]
         fade_st = max(0.0, duration - 1.2)
         fc.append(f"[1:a]atrim=0:{duration:.3f},asetpts=PTS-STARTPTS,volume={music_vol:.2f},"
-                  f"afade=t=in:d=0.4,afade=t=out:st={fade_st:.2f}:d=1.2[mus]")
-        fc.append("[dia][mus]amix=inputs=2:duration=first:normalize=0[amix]")
+                  f"afade=t=in:d=0.4,afade=t=out:st={fade_st:.2f}:d=1.2,"
+                  f"aformat=sample_rates=44100:channel_layouts=stereo[mus]")
+        mix.append("[mus]")
+    sfx = []
+    if effects.get("impact_sfx"):
+        for t in accents[:6]:
+            sfx.append((t, "sine=f=52:r=44100:d=0.7,volume=1.4,afade=t=out:st=0.04:d=0.66:curve=exp"))
+    if effects.get("whoosh_sfx"):
+        for t in trans_times:
+            sfx.append((max(0.0, t - 0.3), "anoisesrc=d=0.5:c=pink:r=44100:a=0.3,highpass=f=400,lowpass=f=6000,"
+                                           "afade=t=in:d=0.3:curve=exp,afade=t=out:st=0.3:d=0.2"))
+    for k, (t, chain) in enumerate(sfx):
+        ms = int(t * 1000)
+        fc.append(f"{chain},aformat=sample_rates=44100:channel_layouts=stereo,adelay={ms}|{ms}[fx{k}]")
+        mix.append(f"[fx{k}]")
+    if len(mix) > 1:
+        fc.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[amix]")
         acur = "[amix]"
     else:
         acur = "[dia]"
     a_final = "afade=t=in:d=0.08"
     if params.get("loop_friendly"):
         a_final += f",afade=t=out:st={max(0.0, duration - 0.15):.2f}:d=0.15"
+    else:
+        a_final += f",afade=t=out:st={max(0.0, duration - 0.6):.2f}:d=0.6"
     if effects.get("loudnorm"):
         a_final += ",loudnorm=I=-14:TP=-1.5:LRA=11"
     fc.append(f"{acur}{a_final},aresample=44100[aout]")
@@ -414,4 +592,5 @@ def render(source: str, params: Dict[str, Any], out_path: Optional[str] = None,
         run_ffmpeg(args, progress=progress, duration=duration, cwd=work)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    return {"path": str(out), "duration": round(duration, 2), "segments": segments, "template": template}
+    return {"path": str(out), "duration": round(duration, 2), "segments": segments, "template": template,
+            "transition": transition if xd else "cut", "accents": accents, "subtitles": len(subtitles)}

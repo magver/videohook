@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, Tuple
 from . import __version__, antigravity, gemini, library, moments, pipeline, publish
 from .core import (WEB_DIR, WORK_DIR, ensure_dirs, ffmpeg_bin, public_settings, resolve_work, tasks,
                    update_settings)
-from .render import MUSIC_TRACKS, TEMPLATES
+from .render import MUSIC_TRACKS, TEMPLATES, TRANSITIONS
 
 log = logging.getLogger("videohook.server")
 PORT = 8765
@@ -55,6 +55,7 @@ def state() -> Dict[str, Any]:
         "health": _health_cache,
         "settings": public_settings(),
         "templates": TEMPLATES,
+        "transitions": TRANSITIONS,
         "music": MUSIC_TRACKS,
         "tasks": tasks.list(active_only=True)[:20],
         "work_dir": str(WORK_DIR),
@@ -147,7 +148,8 @@ def api_post(path: str, body: Dict[str, Any]) -> Any:
         clip = library.require_clip(cid)
         name = clip.get("title", "")[:40]
         if action == "update":
-            allowed = {"hook", "caption", "commentary", "title", "mood", "segment", "music", "key_lines", "anime"}
+            allowed = {"hook", "caption", "commentary", "title", "mood", "segment", "music", "key_lines", "anime",
+                       "subtitles", "transition", "accents"}
             return library.update_clip(cid, {k: v for k, v in body.items() if k in allowed})
         if action == "source":
             return _task("source", f"Источник: {name}", lambda tk: pipeline.fetch_source(cid, tk, body.get("url", "")))

@@ -11,11 +11,11 @@ from typing import Any, Dict, List, Optional
 
 from . import antigravity, discovery, gemini, library, moments, publish
 from .core import RENDERS_DIR, get_settings, rel_to_work, resolve_work, slugify, tasks
-from .render import contact_sheet, extract_thumbnail, render
+from .render import TRANSITIONS, contact_sheet, extract_audio, extract_thumbnail, render
 
 log = logging.getLogger("videohook.pipeline")
 
-TARGET_SECONDS = 30
+TARGET_SECONDS = 35   # ориентир; итоговая длина подстраивается под законченную сцену
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +33,14 @@ def _anime_fields(anime: Optional[Dict[str, Any]], fallback: str = "") -> Dict[s
             "anime_key": anime["key"], "studio": studio, "credit": credit}
 
 
+def _default_music(mood: str, preferred: str = "") -> str:
+    """По умолчанию — родной звук сцены; музыка по настроению только если выбрана «авто»."""
+    choice = get_settings().get("default_music") or "none"
+    if choice == "auto":
+        return preferred or moments.mood_music(mood or "epic")
+    return choice
+
+
 def create_from_moment(anime_key: str, moment_id: str) -> Dict[str, Any]:
     idx = moments._anime_index()
     anime = idx.get(anime_key)
@@ -41,7 +49,6 @@ def create_from_moment(anime_key: str, moment_id: str) -> Dict[str, Any]:
     m = next((x for x in anime["moments"] if moments.moment_id(anime_key, x["title"]) == moment_id), None)
     if not m:
         raise KeyError("Момент не найден")
-    s = get_settings()
     clip = library.add_clip({
         **_anime_fields(anime),
         "moment_id": moment_id,
@@ -52,7 +59,7 @@ def create_from_moment(anime_key: str, moment_id: str) -> Dict[str, Any]:
         "query": m.get("query", ""),
         "query_en": m.get("query_en", ""),
         "source_url": m.get("url", ""),
-        "music": m.get("music") or moments.mood_music(m.get("mood", "epic")) if s.get("default_music") == "auto" else s.get("default_music"),
+        "music": _default_music(m.get("mood", "epic"), m.get("music")),
     })
     moments.mark_used(moment_id, anime_key, clip["id"])
     return clip
@@ -74,7 +81,7 @@ def create_from_url(url: str, title: str = "") -> Dict[str, Any]:
         "source_title": info.get("title", ""),
         "source_channel": info.get("channel", ""),
         "source_views": info.get("views", 0),
-        "music": moments.mood_music("epic"),
+        "music": _default_music("epic"),
     })
     return clip
 
@@ -92,7 +99,8 @@ def _source_candidates(clip: Dict[str, Any], explicit_url: str = "") -> List[Dic
         return out  # пользователь указал ссылку явно — не подменяем её найденными роликами
     query = {"title": clip.get("title", ""), "query": clip.get("query") or f"{clip.get('anime')} {clip.get('title')}",
              "query_en": clip.get("query_en", ""), "anime_en": clip.get("anime_en", ""),
-             "anime_ru": clip.get("anime_ru", "") or clip.get("anime", "")}
+             "anime_ru": clip.get("anime_ru", "") or clip.get("anime", ""),
+             "prefer_ru_dub": bool(get_settings().get("prefer_ru_dub", True))}
     for c in discovery.find_source_for_moment(query):
         if c["url"] not in [o["url"] for o in out]:
             out.append(c)
@@ -106,7 +114,7 @@ def _download_best(url: str, clip: Dict[str, Any], t) -> Dict[str, Any]:
     section = None
     if dur > 240 and heat:
         best = heat[0]
-        section = (max(0.0, best["start"] - 20), min(dur, best["end"] + 25))
+        section = (max(0.0, best["start"] - 45), min(dur, best["end"] + 45))
 
     def prog(p, msg):
         t(0.2 + 0.5 * p, msg)
@@ -150,6 +158,37 @@ def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any
     local = discovery.local_windows(dl["path"], TARGET_SECONDS, 3)
     suggestions = discovery.merge_suggestions(heat_local, local, top_k=5)
     best = suggestions[0] if suggestions else {"start": 0.0, "end": min(local_dur, TARGET_SECONDS)}
+    # границы — к естественным точкам: склейка/пауза перед завязкой, пауза после последней фразы
+    max_len = float(get_settings().get("clip_max_seconds", 58))
+    try:
+        best = {**best, **discovery.refine_bounds(dl["path"], best["start"], best["end"], max_len=max_len)}
+        if suggestions:
+            suggestions[0] = {**suggestions[0], "start": best["start"], "end": best["end"]}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("refine_bounds: %s", exc)
+    accents: List[float] = []
+    try:
+        accents = discovery.audio_peaks(dl["path"], best["start"], best["end"])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("audio_peaks: %s", exc)
+
+    t(0.8, "Субтитры…")
+    subtitles: List[Dict[str, Any]] = []
+    subs_kind = ""
+    try:
+        subs = info.get("subs_ru") or {}
+        if subs:
+            got = discovery.fetch_subtitles(subs, offset, offset + local_dur)
+            subtitles = [{"start": round(x["start"] - offset, 2), "end": round(x["end"] - offset, 2), "text": x["text"]}
+                         for x in got["items"] if x["end"] - offset > 0]
+            subs_kind = "youtube-" + (subs.get("kind", "") if got["lang"] == "ru" else "orig")
+            if subtitles and got["lang"] != "ru":
+                # автоперевод YouTube недоступен — переводим оригинал через ИИ, без ИИ субтитры не показываем
+                subtitles = (gemini.translate_subtitles(subtitles, clip.get("anime_name") or "", got["lang"])
+                             if gemini.available() else [])
+                subs_kind = "gemini-translate"
+    except Exception as exc:  # noqa: BLE001
+        log.warning("subtitles: %s", exc)
 
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
     thumb = RENDERS_DIR / f"{clip_id}_src.jpg"
@@ -169,6 +208,12 @@ def fetch_source(clip_id: str, task=None, source_url: str = "") -> Dict[str, Any
         "source_candidates": [c for c in candidates if c.get("title")][:6],
         "suggestions": suggestions,
         "segment": {"start": best["start"], "end": best["end"]},
+        "parts": [],
+        "accents": accents,
+        "slowmo": None,
+        "subtitles": subtitles,
+        "subtitles_source": subs_kind if subtitles else "",
+        "ru_dub": bool(info.get("ru_dub")),
         "thumb": rel_to_work(thumb) if thumb else "",
     }
     library.update_clip(clip_id, patch, note=f"Источник: {patch['source_title'][:60]} ({int(local_dur)} c)")
@@ -191,19 +236,39 @@ def ai_analyze(clip_id: str, task=None) -> Dict[str, Any]:
         task.update(0.85, "Gemini смотрит видео…")
     src = resolve_work(clip["source_file"])
     ctx = f"{clip.get('anime_name')}, сцена «{clip.get('title')}»"
-    storyboard = None
+    storyboard = audio = None
     try:
         sb = RENDERS_DIR / f"{clip_id}_storyboard.jpg"
         storyboard = contact_sheet(str(src), str(sb))
     except Exception as exc:  # noqa: BLE001
         log.warning("storyboard: %s", exc)
+    try:
+        audio = extract_audio(str(src), str(RENDERS_DIR / f"{clip_id}_audio.wav"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("audio: %s", exc)
+    s = get_settings()
     data = gemini.analyze_video(src, ctx, TARGET_SECONDS, mood=clip.get("mood", ""), hook=clip.get("hook", ""),
-                                hints=clip.get("suggestions", []), storyboard=storyboard,
+                                hints=clip.get("suggestions", []), storyboard=storyboard, audio=audio,
+                                max_seconds=int(s.get("clip_max_seconds", 58)), ru_audio=bool(clip.get("ru_dub")),
                                 progress=(lambda m: task.update(None, m)) if task else None)
+    dur = float(clip.get("source_duration") or 0) or 1e9
     suggestions = discovery.merge_suggestions(data.get("segments", []), clip.get("suggestions", []), top_k=5)
-    patch: Dict[str, Any] = {"suggestions": suggestions, "ai": {k: data.get(k) for k in ("hook", "caption", "mood")}}
-    if suggestions:
+    patch: Dict[str, Any] = {"suggestions": suggestions,
+                             "ai": {k: data.get(k) for k in ("hook", "caption", "mood", "story", "dialogue_heavy")}}
+    if data.get("segments"):
+        best = data["segments"][0]
+        patch["segment"] = {"start": max(0.0, best["start"]), "end": min(dur, best["end"])}
+        patch["parts"] = [[max(0.0, a), min(dur, b)] for a, b in data.get("parts") or [] if a < dur]
+    elif suggestions:
         patch["segment"] = {"start": suggestions[0]["start"], "end": suggestions[0]["end"]}
+    if data.get("accents"):
+        patch["accents"] = data["accents"]
+    patch["slowmo"] = data.get("slowmo")
+    if data.get("transition") in TRANSITIONS:
+        patch["transition"] = data["transition"]
+    if data.get("subtitles"):
+        patch["subtitles"] = data["subtitles"]
+        patch["subtitles_source"] = "gemini"
     if data.get("hook"):
         patch["hook"] = data["hook"]
     if data.get("caption"):
@@ -220,13 +285,27 @@ def ai_analyze(clip_id: str, task=None) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Шаг 2: монтаж
 # ---------------------------------------------------------------------------
+def clip_segments(clip: Dict[str, Any]) -> List[List[float]]:
+    """Части ролика: если ИИ разбил сцену на части и отрезок не меняли вручную — части, иначе весь отрезок."""
+    seg = clip.get("segment") or {"start": 0, "end": TARGET_SECONDS}
+    parts = clip.get("parts") or []
+    if len(parts) > 1 and abs(parts[0][0] - seg["start"]) < 0.6 and abs(parts[-1][1] - seg["end"]) < 0.6:
+        return [[float(a), float(b)] for a, b in parts]
+    return [[float(seg["start"]), float(seg["end"])]]
+
+
 def render_params(clip: Dict[str, Any], overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     s = get_settings()
-    seg = clip.get("segment") or {"start": 0, "end": TARGET_SECONDS}
     prev = (clip.get("render") or {}).get("params") or {}
+    subs_on = s.get("subtitles_mode", "auto") != "off"
     p = {
         "template": prev.get("template") or s.get("default_template", "cinema"),
-        "segments": [[seg["start"], seg["end"]]],
+        "segments": clip_segments(clip),
+        "mood": clip.get("mood", "epic"),
+        "transition": prev.get("transition") or clip.get("transition") or "auto",
+        "accents": clip.get("accents") or [],
+        "slowmo": clip.get("slowmo"),
+        "subtitles": clip.get("subtitles") if subs_on else [],
         "hook": clip.get("hook", ""),
         "caption": clip.get("caption", ""),
         "anime_label": clip.get("anime", ""),
@@ -234,13 +313,15 @@ def render_params(clip: Dict[str, Any], overrides: Optional[Dict[str, Any]] = No
         "credit": clip.get("credit", ""),
         "music": prev.get("music") or clip.get("music") or "none",
         "music_volume": prev.get("music_volume", s.get("music_volume", 0.22)),
-        "loop_friendly": prev.get("loop_friendly", s.get("loop_friendly", True)),
+        "loop_friendly": prev.get("loop_friendly", s.get("loop_friendly", False)),
         "effects": prev.get("effects") or {},
         "max_seconds": s.get("clip_max_seconds", 45),
         "progress_bar": prev.get("progress_bar", True),
         "commentary": clip.get("commentary", ""),
     }
     p.update({k: v for k, v in (overrides or {}).items() if v is not None})
+    if p.get("use_subtitles") is False:
+        p["subtitles"] = []
     # реплики: время исходника → время ролика
     st = float(p["segments"][0][0])
     en = float(p["segments"][-1][1])
@@ -258,8 +339,11 @@ def make_render(clip_id: str, overrides: Optional[Dict[str, Any]] = None, task=N
     if text_fields:
         clip = library.update_clip(clip_id, text_fields)
     if overrides and overrides.get("segments"):
-        s0, e0 = overrides["segments"][0]
-        clip = library.update_clip(clip_id, {"segment": {"start": float(s0), "end": float(e0)}})
+        segs = overrides["segments"]
+        patch = {"segment": {"start": float(segs[0][0]), "end": float(segs[-1][1])}}
+        if segs != clip_segments(clip):
+            patch["parts"] = [[float(a), float(b)] for a, b in segs] if len(segs) > 1 else []
+        clip = library.update_clip(clip_id, patch)
     params = render_params(clip, overrides)
     out = RENDERS_DIR / f"{slugify(clip.get('anime') or 'anime', 20)}_{clip_id}.mp4"
     if task:

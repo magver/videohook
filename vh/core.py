@@ -130,10 +130,13 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "use_antigravity": True,                 # False — публиковать локальный рендер без агента
     # Рендер
     "default_template": "cinema",
-    "default_music": "auto",
+    "default_music": "none",                 # родной звук сцены; "auto" — музыка по настроению
     "music_volume": 0.22,
-    "clip_max_seconds": 45,
-    "loop_friendly": True,
+    "clip_max_seconds": 58,                  # верхняя граница: сцена не обрезается ради короткой длины
+    "loop_friendly": False,                  # True — короткий кроссфейд звука в конце для лупа
+    "subtitles_mode": "auto",                # auto — русские субтитры, если есть реплики; off — без субтитров
+    "prefer_ru_dub": True,                   # искать источник с русской озвучкой в первую очередь
+    "settings_rev": 2,
     # Публикация
     "youtube_client_secret": "",             # путь к client_secret.json (Google Cloud OAuth, desktop)
     "youtube_privacy": "private",
@@ -144,8 +147,26 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
 _settings_store = JsonStore(DATA_DIR / "settings.json", DEFAULT_SETTINGS)
 
 
+def _migrate(data: Dict[str, Any]) -> None:
+    """Однократно переводит старые значения по умолчанию на новые (не трогая осознанно изменённые)."""
+    if int(data.get("settings_rev", 1)) >= 2:
+        return
+    old_defaults = {"default_music": "auto", "clip_max_seconds": 45, "loop_friendly": True}
+    for k, v in old_defaults.items():
+        if data.get(k, v) == v:
+            data[k] = DEFAULT_SETTINGS[k]
+    data["settings_rev"] = 2
+    try:
+        _settings_store.save()
+    except OSError:
+        pass
+
+
 def get_settings() -> Dict[str, Any]:
-    data = _settings_store.load()
+    with _settings_store.lock:
+        data = _settings_store.load()
+        if data:
+            _migrate(data)
     merged = dict(DEFAULT_SETTINGS)
     merged.update(data or {})
     return merged
